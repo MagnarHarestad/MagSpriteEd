@@ -125,10 +125,11 @@ public sealed class MainForm : Form
         WireEvents();
         KeyDown += MainForm_KeyDown;
         FitCanvasToScrollArea();
+        FitPoolStripWidth();
         // Layout right after construction can under-report available space
         // (DPI scaling, the window not having done its first real layout
         // pass yet) - re-fit once more once the form has actually loaded.
-        Load += (_, _) => FitCanvasToScrollArea();
+        Load += (_, _) => { FitCanvasToScrollArea(); FitPoolStripWidth(); };
         SelectFrame(0);
         RefreshStatus("Ready - procedurally-generated bank loaded (matches the original demo's shipped output).");
     }
@@ -239,6 +240,19 @@ public sealed class MainForm : Form
             Padding = new Padding(2)
         };
         _spritePoolScroll.Controls.Add(_spritePoolStrip);
+        // ClientSizeChanged (not SizeChanged) also catches the case that
+        // actually caused the leftover horizontal scrollbar: the panel's
+        // own outer bounds don't change when SetPieceCount grows the strip
+        // tall enough to need a vertical scrollbar, but its CLIENT area
+        // does (shrinks by the scrollbar's width) - and a hardcoded once-
+        // guessed reservation for that width (SystemInformation's, which
+        // can be a few pixels off from what actually gets drawn depending
+        // on theme/DPI) isn't reliable enough on its own. Re-fitting the
+        // strip's own Width to whatever's actually available, every time
+        // that available space can change, is what actually guarantees no
+        // horizontal scrollbar ever shows up unless the piece truly
+        // doesn't fit any more.
+        _spritePoolScroll.ClientSizeChanged += (_, _) => FitPoolStripWidth();
 
         var editArea = new TableLayoutPanel
         {
@@ -623,6 +637,18 @@ public sealed class MainForm : Form
         if (_bank.IsHires(_editPiece)) _canvas.Reconfigure(SpriteBank.HiresCols, unit, unit);
         else _canvas.Reconfigure(SpriteBank.QuadCols, unit * 2, unit);
         _canvas.Location = new Point(_canvasScroll.Padding.Left, _canvasScroll.Padding.Top);
+    }
+
+    /// <summary>Keeps the pool strip's own Width exactly matching whatever
+    /// horizontal space _spritePoolScroll's client area actually has right
+    /// now, so it never ends up a few pixels wider than what's genuinely
+    /// available (which is what triggers an unwanted horizontal
+    /// scrollbar) - see the ClientSizeChanged wiring in BuildUi.</summary>
+    private void FitPoolStripWidth()
+    {
+        int availW = _spritePoolScroll.ClientSize.Width - _spritePoolScroll.Padding.Horizontal;
+        if (availW <= 0) return;
+        _spritePoolStrip.Width = availW;
     }
 
     /// <summary>Reflects _editPiece's current hires flag onto the toolbar
