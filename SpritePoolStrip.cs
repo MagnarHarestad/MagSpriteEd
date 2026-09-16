@@ -23,13 +23,17 @@ internal sealed class SpritePoolStrip : Control
 {
     private const int Cols = SpriteBank.QuadCols;
     private const int Rows = SpriteBank.QuadRows;
-    private const int ThumbCellSize = 6;
+    // A real C64 multicolour pixel is twice as wide as it is tall (see
+    // PixelGridControl's own remarks) - ThumbCellWidth is exactly double
+    // ThumbCellHeight so these thumbnails match the big edit canvas's shape.
+    private const int ThumbCellHeight = 6;
+    private const int ThumbCellWidth = ThumbCellHeight * 2;
     private const int LabelHeight = 14;
     private const int Pad = 8;
     private const int Gap = 10;
 
-    private const int ThumbWidth = Cols * ThumbCellSize;
-    private const int ThumbHeight = Rows * ThumbCellSize;
+    private const int ThumbWidth = Cols * ThumbCellWidth;
+    private const int ThumbHeight = Rows * ThumbCellHeight;
     private const int RowStride = LabelHeight + ThumbHeight + Gap;
 
     /// <summary>Width this control wants - the host lays it out at this
@@ -97,14 +101,20 @@ internal sealed class SpritePoolStrip : Control
                 g.DrawString("#" + p, font, textBrush, Pad, top);
 
             int thumbTop = top + LabelHeight;
+            // Flat background rather than PixelGridControl's checkerboard -
+            // at this small a size a checker pattern reads as visual noise
+            // (almost a grid in its own right), and these are meant to be
+            // read as a plain colour silhouette, not edited directly.
+            using (var bg = new SolidBrush(Color.FromArgb(30, 30, 30)))
+                g.FillRectangle(bg, Pad, thumbTop, ThumbWidth, ThumbHeight);
             for (int r = 0; r < Rows; r++)
             {
                 for (int c = 0; c < Cols; c++)
                 {
                     byte v = PixelProvider?.Invoke(p, r, c) ?? 0;
-                    Color col = v == 0 ? CheckerColor(r, c) : (PaletteProvider?.Invoke(v) ?? Color.Magenta);
-                    using var b = new SolidBrush(col);
-                    g.FillRectangle(b, Pad + c * ThumbCellSize, thumbTop + r * ThumbCellSize, ThumbCellSize, ThumbCellSize);
+                    if (v == 0) continue;
+                    using var b = new SolidBrush(PaletteProvider?.Invoke(v) ?? Color.Magenta);
+                    g.FillRectangle(b, Pad + c * ThumbCellWidth, thumbTop + r * ThumbCellHeight, ThumbCellWidth, ThumbCellHeight);
                 }
             }
 
@@ -112,9 +122,6 @@ internal sealed class SpritePoolStrip : Control
             g.DrawRectangle(border, Pad - 1, thumbTop - 1, ThumbWidth + 1, ThumbHeight + 1);
         }
     }
-
-    private static Color CheckerColor(int r, int c) =>
-        ((r / 2 + c / 2) % 2 == 0) ? Color.FromArgb(38, 38, 38) : Color.FromArgb(52, 52, 52);
 
     protected override void OnMouseDown(MouseEventArgs e)
     {

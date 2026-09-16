@@ -8,11 +8,12 @@ namespace MagSpriteEd;
 
 public sealed class MainForm : Form
 {
-    // 2x the old flat-block cell size (14) - a single 12x21 sprite at this
-    // zoom occupies the same on-screen footprint the old 24x42 four-quad
-    // block did, so "highly zoomed in on one sprite" doesn't shrink the
-    // editing area versus before.
-    private const int EditCellSize = 28;
+    // A real C64 multicolour sprite pixel is twice as wide as it is tall
+    // (it occupies 2 hires dot-widths but only 1 scanline) - EditCellWidth
+    // is exactly double EditCellHeight to render that accurately, matching
+    // PositionedEditCanvas's own 2x-wide pixel rectangles.
+    private const int EditCellHeight = 28;
+    private const int EditCellWidth = EditCellHeight * 2;
 
     private SpriteBank _bank = CreateDefaultBank();
 
@@ -149,7 +150,7 @@ public sealed class MainForm : Form
         // ---- Left: edit canvas - Single Sprite View (one 12x21 piece,
         // highly zoomed in - the default) or Positioned view (zoomed, in
         // place over the backdrop, panned with middle-drag) ----
-        _canvas = new PixelGridControl(SpriteBank.QuadRows, SpriteBank.QuadCols, EditCellSize)
+        _canvas = new PixelGridControl(SpriteBank.QuadRows, SpriteBank.QuadCols, EditCellWidth, EditCellHeight)
         {
             PixelProvider = (r, c) => _bank.Get(_editPiece, r, c),
             PaletteProvider = PaletteColor
@@ -653,8 +654,8 @@ public sealed class MainForm : Form
         if (e.Button != MouseButtons.Left && e.Button != MouseButtons.Right) return;
         EnsureExclusiveEditTarget();
         PushUndo();
-        int col = e.X / EditCellSize;
-        int row = e.Y / EditCellSize;
+        int col = e.X / EditCellWidth;
+        int row = e.Y / EditCellHeight;
         _lineStartRow = row;
         _lineStartCol = col;
         _hoverRow = row;
