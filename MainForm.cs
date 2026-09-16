@@ -307,6 +307,12 @@ public sealed class MainForm : Form
     /// settle first.</summary>
     private void DeferDialogAction(Action action) => BeginInvoke(action);
 
+    private void ShowAbout()
+    {
+        using var dlg = new AboutDialog();
+        dlg.ShowDialog(this);
+    }
+
     private void BuildToolbar()
     {
         _toolbar = new ToolStrip
@@ -326,6 +332,8 @@ public sealed class MainForm : Form
             DisplayStyle = ToolStripItemDisplayStyle.Image,
             ToolTipText = "Menu"
         };
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("About MagSpriteEd...", Icons.Info(), (_, _) => DeferDialogAction(ShowAbout)));
+        menuBtn.DropDownItems.Add(new ToolStripSeparator());
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("New Blank Bank", Icons.New(), (_, _) => NewBlankBank()));
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("New Procedural Bank", Icons.Wand(), (_, _) => NewProceduralBank()));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());

@@ -271,4 +271,13 @@ internal static class Icons
         g.FillRectangle(b, 7, 13, 2, 2);
         g.FillRectangle(b, 11, 13, 2, 2);
     });
+
+    public static Bitmap Info() => Make(g =>
+    {
+        using var pen = new Pen(Stroke, 1.6f);
+        g.DrawEllipse(pen, 3, 3, 14, 14);
+        using var b = new SolidBrush(Stroke);
+        g.FillRectangle(b, 9, 8, 2, 7);
+        g.FillEllipse(b, 9, 5, 2, 2);
+    });
 }
