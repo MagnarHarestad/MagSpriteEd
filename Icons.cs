@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
-namespace FireSpriteEditor;
+namespace MagSpriteEd;
 
 /// <summary>
 /// Small toolbar icons, drawn programmatically via GDI+ rather than loaded

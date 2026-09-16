@@ -1,7 +1,7 @@
 using System;
 using System.Drawing;
 
-namespace FireSpriteEditor;
+namespace MagSpriteEd;
 
 /// <summary>
 /// Customizable colour assignment for the flat pixel editor's 3 real

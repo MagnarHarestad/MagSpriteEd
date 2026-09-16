@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.IO;
 
-namespace FireSpriteEditor;
+namespace MagSpriteEd;
 
 /// <summary>
 /// Decodes a Koala Painter (.kla/.koa) picture into a 320x200 bitmap, for

@@ -4,7 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 
-namespace FireSpriteEditor;
+namespace MagSpriteEd;
 
 public sealed class MainForm : Form
 {
@@ -78,7 +78,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "Fire Sprite Editor - PlasmaBollLightningBolts3D";
+        Text = "MagSpriteEd - PlasmaBollLightningBolts3D";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1300, 760);
         Size = new Size(1680, 900);
@@ -92,7 +92,7 @@ public sealed class MainForm : Form
         // it here too from the embedded copy sets the actual RUNNING
         // window/taskbar icon, which WinForms doesn't inherit from that
         // Win32 resource on its own.
-        using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("FireSpriteEditor.AppIcon.ico"))
+        using (var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("MagSpriteEd.AppIcon.ico"))
         {
             if (iconStream != null) Icon = new Icon(iconStream);
         }
@@ -101,7 +101,7 @@ public sealed class MainForm : Form
         WireEvents();
         KeyDown += MainForm_KeyDown;
         SelectFrame(0);
-        RefreshStatus("Ready - procedurally-generated bank loaded (matches the current shipped Fire.s output).");
+        RefreshStatus("Ready - procedurally-generated bank loaded (matches the original demo's shipped output).");
     }
 
     private static SpriteBank CreateDefaultBank()
@@ -249,7 +249,7 @@ public sealed class MainForm : Form
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Save Project (.json)...", Icons.Save(), (_, _) => DeferDialogAction(SaveProject)));
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Save Project", Icons.Save(), (_, _) => SaveProjectQuick()));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export ASM (Fire_Sprites_Data.s)...", Icons.Export(), (_, _) => DeferDialogAction(ExportAsm)));
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export ASM (MagSpriteEd_Sprites_Data.s)...", Icons.Export(), (_, _) => DeferDialogAction(ExportAsm)));
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export Binary (.bin)...", Icons.Export(), (_, _) => DeferDialogAction(ExportBinary)));
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export Optimized ASM (deduplicated)...", Icons.Export(), (_, _) => DeferDialogAction(_constructPanel.ExportOptimizedAsm)));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
@@ -1118,7 +1118,7 @@ public sealed class MainForm : Form
         {
             Title = "Save project",
             Filter = "Sprite editor project (*.json)|*.json",
-            FileName = "fire_sprites_project.json"
+            FileName = "magspriteed_project.json"
         };
         if (sfd.ShowDialog(this) != DialogResult.OK) return;
         try
@@ -1153,9 +1153,9 @@ public sealed class MainForm : Form
         string startupDir = Path.Combine(root, "Startup");
         using var sfd = new SaveFileDialog
         {
-            Title = "Export ASM - overwrites Fire_Sprites_Data.s",
+            Title = "Export ASM - overwrites MagSpriteEd_Sprites_Data.s",
             Filter = "Assembly source (*.s)|*.s|All files (*.*)|*.*",
-            FileName = "Fire_Sprites_Data.s",
+            FileName = "MagSpriteEd_Sprites_Data.s",
             InitialDirectory = Directory.Exists(startupDir) ? startupDir : root
         };
         if (sfd.ShowDialog(this) != DialogResult.OK) return;
@@ -1177,7 +1177,7 @@ public sealed class MainForm : Form
         {
             Title = "Export raw binary",
             Filter = "Binary (*.bin)|*.bin|All files (*.*)|*.*",
-            FileName = "fire_sprites.bin"
+            FileName = "magspriteed_sprites.bin"
         };
         if (sfd.ShowDialog(this) != DialogResult.OK) return;
         try

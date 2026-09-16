@@ -4,7 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace FireSpriteEditor;
+namespace MagSpriteEd;
 
 /// <summary>
 /// Composites the backdrop picture with the 8 hardware sprites at their

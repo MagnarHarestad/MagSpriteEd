@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>MagSpriteEd</AssemblyName>
-    <RootNamespace>FireSpriteEditor</RootNamespace>
+    <RootNamespace>MagSpriteEd</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationIcon>AppIcon.ico</ApplicationIcon>
   </PropertyGroup>

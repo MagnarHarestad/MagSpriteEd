@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace FireSpriteEditor;
+namespace MagSpriteEd;
 
 /// <summary>
 /// Small borderless popup showing all 16 real C64 colours in a 4x4 grid,

@@ -1,4 +1,4 @@
-# MagSpriteEd (Fire Sprite Editor)
+# MagSpriteEd
 
 A Windows desktop tool for hand-authoring animated Commodore 64 multicolour
 hardware-sprite art: draw a pool of 12x21 sprites, arrange up to 8 hardware
@@ -44,7 +44,7 @@ works entirely standalone.
   out of a `.prg` + VICE-format `.sym` pair by locating its
   `fire_frameN_{tl,tr,bl,br}` symbols.
 - **Export**
-  - ASM source (`Fire_Sprites_Data.s`-style), one label per sprite piece.
+  - ASM source (`MagSpriteEd_Sprites_Data.s`-style), one label per sprite piece.
   - Deduplicated/optimized ASM plus composition tables (positions and
     per-frame Sprite # arrays), for a build that reads the animation back
     out of tables instead of hand-written code.
@@ -62,8 +62,8 @@ dotnet build -c Release
 dotnet run -c Release
 ```
 
-or open `SpriteEditor.csproj` in Visual Studio / Rider and run from there.
-The produced executable is `FireSpriteEditor.exe`.
+or open `MagSpriteEd.csproj` in Visual Studio / Rider and run from there.
+The produced executable is `MagSpriteEd.exe`.
 
 ## Usage notes
 

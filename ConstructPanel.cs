@@ -5,7 +5,7 @@ using System.IO;
 using System.Text;
 using System.Windows.Forms;
 
-namespace FireSpriteEditor;
+namespace MagSpriteEd;
 
 /// <summary>
 /// Placement/composition panel, embedded directly in MainForm to the right
@@ -341,7 +341,7 @@ public sealed class ConstructPanel : UserControl
         copyNext.Click += (_, _) => CopyPositionsToNextFrame();
         var copyAll = new Button { Text = "Copy positions -> all frames", AutoSize = true, Margin = new Padding(2) };
         copyAll.Click += (_, _) => CopyPositionsToAllFrames();
-        var resetBtn = new Button { Text = "Reset all frames to Fire.s defaults", AutoSize = true, Margin = new Padding(2) };
+        var resetBtn = new Button { Text = "Reset all frames to defaults", AutoSize = true, Margin = new Padding(2) };
         resetBtn.Click += (_, _) => { ResetAllFramesToDefaults(); LoadFrameIntoCanvas(); };
         return Stack(copyNext, copyAll, resetBtn);
     }
@@ -1072,7 +1072,7 @@ public sealed class ConstructPanel : UserControl
         {
             Title = "Export optimized (deduplicated) ASM composition",
             Filter = "Assembly source (*.s)|*.s|All files (*.*)|*.*",
-            FileName = "Fire_Composition_Data.s"
+            FileName = "MagSpriteEd_Composition_Data.s"
         };
         if (sfd.ShowDialog(FindForm()) != DialogResult.OK) return;
         var bank = _bankProvider();
