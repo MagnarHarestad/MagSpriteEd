@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>FireSpriteEditor</AssemblyName>
+    <RootNamespace>FireSpriteEditor</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationIcon>AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Also embedded (not just used as the .exe's Win32 resource icon)
+         so MainForm can set it as the running window/taskbar icon too -
+         see MainForm's constructor. -->
+    <EmbeddedResource Include="AppIcon.ico" />
+  </ItemGroup>
+
+</Project>
