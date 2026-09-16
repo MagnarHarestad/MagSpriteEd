@@ -8,12 +8,16 @@ namespace MagSpriteEd;
 
 public sealed class MainForm : Form
 {
+    // The flat canvas zooms to fill whatever space _canvasScroll actually
+    // has (see FitCanvasToScrollArea) rather than a fixed pixel size, so it
+    // never needs a horizontal scrollbar at a normal window size - these
+    // just bound how far that auto-fit can zoom in a tiny or huge window.
     // A real C64 multicolour sprite pixel is twice as wide as it is tall
-    // (it occupies 2 hires dot-widths but only 1 scanline) - EditCellWidth
-    // is exactly double EditCellHeight to render that accurately, matching
-    // PositionedEditCanvas's own 2x-wide pixel rectangles.
-    private const int EditCellHeight = 28;
-    private const int EditCellWidth = EditCellHeight * 2;
+    // (it occupies 2 hires dot-widths but only 1 scanline), so the cell
+    // width FitCanvasToScrollArea picks is always exactly double its
+    // height, matching PositionedEditCanvas's own 2x-wide pixel rectangles.
+    private const int MinEditCellHeight = 10;
+    private const int MaxEditCellHeight = 36;
 
     private SpriteBank _bank = CreateDefaultBank();
 
@@ -113,6 +117,11 @@ public sealed class MainForm : Form
         BuildUi();
         WireEvents();
         KeyDown += MainForm_KeyDown;
+        FitCanvasToScrollArea();
+        // Layout right after construction can under-report available space
+        // (DPI scaling, the window not having done its first real layout
+        // pass yet) - re-fit once more once the form has actually loaded.
+        Load += (_, _) => FitCanvasToScrollArea();
         SelectFrame(0);
         RefreshStatus("Ready - procedurally-generated bank loaded (matches the original demo's shipped output).");
     }
@@ -150,7 +159,7 @@ public sealed class MainForm : Form
         // ---- Left: edit canvas - Single Sprite View (one 12x21 piece,
         // highly zoomed in - the default) or Positioned view (zoomed, in
         // place over the backdrop, panned with middle-drag) ----
-        _canvas = new PixelGridControl(SpriteBank.QuadRows, SpriteBank.QuadCols, EditCellWidth, EditCellHeight)
+        _canvas = new PixelGridControl(SpriteBank.QuadRows, SpriteBank.QuadCols, MaxEditCellHeight * 2, MaxEditCellHeight)
         {
             PixelProvider = (r, c) => _bank.Get(_editPiece, r, c),
             PaletteProvider = PaletteColor
@@ -158,6 +167,11 @@ public sealed class MainForm : Form
         _canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(12, 12, 12), Padding = new Padding(20) };
         _canvasScroll.Controls.Add(_canvas);
         _canvas.Location = new Point(20, 20);
+        // Re-fit whenever the host area's size actually changes (window
+        // resize, Positioned view toggling off and giving this back the
+        // full width, etc.) - keeps the canvas at the largest zoom that
+        // still needs no horizontal scrollbar.
+        _canvasScroll.SizeChanged += (_, _) => FitCanvasToScrollArea();
 
         _positionedCanvas = new PositionedEditCanvas
         {
@@ -538,6 +552,23 @@ public sealed class MainForm : Form
         popup.Show(this);
     }
 
+    /// <summary>Picks the largest cell size (bounded by Min/MaxEditCellHeight)
+    /// that still fits the whole 12x21 grid into _canvasScroll's current
+    /// client area without needing a horizontal scrollbar - see its
+    /// SizeChanged wiring in BuildUi and the initial calls in the
+    /// constructor.</summary>
+    private void FitCanvasToScrollArea()
+    {
+        int availW = _canvasScroll.ClientSize.Width - _canvasScroll.Padding.Horizontal;
+        int availH = _canvasScroll.ClientSize.Height - _canvasScroll.Padding.Vertical;
+        if (availW <= 0 || availH <= 0) return;
+        int byWidth = availW / (SpriteBank.QuadCols * 2); // cell width is 2x cell height
+        int byHeight = availH / SpriteBank.QuadRows;
+        int cellHeight = Math.Clamp(Math.Min(byWidth, byHeight), MinEditCellHeight, MaxEditCellHeight);
+        _canvas.SetCellSize(cellHeight * 2, cellHeight);
+        _canvas.Location = new Point(_canvasScroll.Padding.Left, _canvasScroll.Padding.Top);
+    }
+
     private void SetPositionedMode(bool positioned)
     {
         _canvasScroll.Visible = !positioned;
@@ -563,6 +594,7 @@ public sealed class MainForm : Form
             // refresh every thumbnail once on the way back in.
             _spritePoolStrip.Invalidate();
             ScrollPoolStripToSelection();
+            FitCanvasToScrollArea();
         }
     }
 
@@ -654,8 +686,8 @@ public sealed class MainForm : Form
         if (e.Button != MouseButtons.Left && e.Button != MouseButtons.Right) return;
         EnsureExclusiveEditTarget();
         PushUndo();
-        int col = e.X / EditCellWidth;
-        int row = e.Y / EditCellHeight;
+        int col = e.X / _canvas.CellWidth;
+        int row = e.Y / _canvas.CellHeight;
         _lineStartRow = row;
         _lineStartCol = col;
         _hoverRow = row;

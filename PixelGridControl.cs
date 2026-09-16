@@ -18,8 +18,8 @@ internal sealed class PixelGridControl : Control
 {
     public int Rows { get; }
     public int Cols { get; }
-    public int CellWidth { get; }
-    public int CellHeight { get; }
+    public int CellWidth { get; private set; }
+    public int CellHeight { get; private set; }
     public bool Interactive { get; set; } = true;
 
     /// <summary>Quadrant boundary column/row (0 to disable), drawn as a bold guide line.</summary>
@@ -44,6 +44,19 @@ internal sealed class PixelGridControl : Control
         BackColor = Color.Black;
         Size = new Size(cols * cellWidth + 1, rows * cellHeight + 1);
         SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+    }
+
+    /// <summary>Re-zooms to a new cell size - used by MainForm to fit the
+    /// whole 12x21 grid into whatever space is actually available as the
+    /// window resizes, instead of a fixed zoom level that may need a
+    /// horizontal scrollbar at typical window widths.</summary>
+    public void SetCellSize(int cellWidth, int cellHeight)
+    {
+        if (cellWidth == CellWidth && cellHeight == CellHeight) return;
+        CellWidth = cellWidth;
+        CellHeight = cellHeight;
+        Size = new Size(Cols * cellWidth + 1, Rows * cellHeight + 1);
+        Invalidate();
     }
 
     protected override void OnPaint(PaintEventArgs e)

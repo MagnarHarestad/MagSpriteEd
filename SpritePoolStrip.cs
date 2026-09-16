@@ -37,8 +37,11 @@ internal sealed class SpritePoolStrip : Control
     private const int RowStride = LabelHeight + ThumbHeight + Gap;
 
     /// <summary>Width this control wants - the host lays it out at this
-    /// fixed width (plus room for the scrollbar) regardless of piece count.</summary>
-    public const int PreferredWidth = ThumbWidth + Pad * 2 + 22;
+    /// fixed width regardless of piece count. Uses the actual system
+    /// vertical scrollbar width (not a guessed constant) so the host's
+    /// AutoScroll panel never ends up a few pixels too narrow and grows an
+    /// unwanted horizontal scrollbar alongside its vertical one.</summary>
+    public static int PreferredWidth => ThumbWidth + Pad * 2 + SystemInformation.VerticalScrollBarWidth + 2;
 
     public int PieceCount { get; private set; }
     public int SelectedPiece { get; private set; } = -1;
