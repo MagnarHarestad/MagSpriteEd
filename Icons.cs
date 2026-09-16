@@ -280,4 +280,20 @@ internal static class Icons
         g.FillRectangle(b, 9, 8, 2, 7);
         g.FillEllipse(b, 9, 5, 2, 2);
     });
+
+    // Same total 16px-wide footprint in both - 3 double-width bars for
+    // multicolour vs 6 half-width bars for hires - so the pair reads as
+    // "same sprite, coarser or finer horizontal resolution" rather than two
+    // unrelated glyphs.
+    public static Bitmap Multicolor() => Make(g =>
+    {
+        using var b = new SolidBrush(Stroke);
+        for (int i = 0; i < 3; i++) g.FillRectangle(b, 2 + i * 6, 3, 4, 14);
+    });
+
+    public static Bitmap Hires() => Make(g =>
+    {
+        using var b = new SolidBrush(Stroke);
+        for (int i = 0; i < 6; i++) g.FillRectangle(b, 2 + i * 3, 3, 1.6f, 14);
+    });
 }

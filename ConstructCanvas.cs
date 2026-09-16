@@ -31,10 +31,13 @@ internal sealed class ConstructCanvas : Control
     /// e.g. to check how it actually reads over the backdrop.</summary>
     public bool ShowOutlines { get; set; } = true;
 
-    /// <summary>(spriteIndex, row 0..20, col 0..11) -> pixel value 0..3.</summary>
+    /// <summary>(spriteIndex, row 0..20, col 0..11) -> raw 2-bit cell value 0..3.</summary>
     public Func<int, int, int, byte>? SpritePixel { get; set; }
     /// <summary>(pixel value, spriteIndex) -> preview colour.</summary>
     public Func<byte, int, Color>? PaletteProvider { get; set; }
+    /// <summary>spriteIndex -> whether the piece it currently shows is
+    /// hires rather than multicolour - see SpriteBank.IsHires.</summary>
+    public Func<int, bool>? IsSpriteHires { get; set; }
 
     public readonly int[] SpriteX = new int[8];
     public readonly int[] SpriteY = new int[8];
@@ -96,14 +99,37 @@ internal sealed class ConstructCanvas : Control
 
         if (SpritePixel != null && PaletteProvider != null)
         {
+            bool hires = IsSpriteHires?.Invoke(spriteIndex) ?? false;
             for (int r = 0; r < 21; r++)
             {
                 for (int c = 0; c < 12; c++)
                 {
                     byte v = SpritePixel(spriteIndex, r, c);
-                    if (v == 0) continue;
-                    using var brush = new SolidBrush(PaletteProvider(v, spriteIndex));
-                    g.FillRectangle(brush, (screenX + c * 2) * Zoom, (screenY + r) * Zoom, 2 * Zoom, Zoom);
+                    if (hires)
+                    {
+                        // Each raw cell packs 2 independent hires pixels -
+                        // high bit left, low bit right (see SpriteBank's
+                        // GetHiresPixel remarks) - both drawn in the same
+                        // "Individual" colour hires sprites actually use on
+                        // real hardware (one colour register per sprite,
+                        // no shared MC1/MC2).
+                        if ((v & 2) != 0)
+                        {
+                            using var b1 = new SolidBrush(PaletteProvider(2, spriteIndex));
+                            g.FillRectangle(b1, (screenX + c * 2) * Zoom, (screenY + r) * Zoom, Zoom, Zoom);
+                        }
+                        if ((v & 1) != 0)
+                        {
+                            using var b2 = new SolidBrush(PaletteProvider(2, spriteIndex));
+                            g.FillRectangle(b2, (screenX + c * 2 + 1) * Zoom, (screenY + r) * Zoom, Zoom, Zoom);
+                        }
+                    }
+                    else
+                    {
+                        if (v == 0) continue;
+                        using var brush = new SolidBrush(PaletteProvider(v, spriteIndex));
+                        g.FillRectangle(brush, (screenX + c * 2) * Zoom, (screenY + r) * Zoom, 2 * Zoom, Zoom);
+                    }
                 }
             }
         }

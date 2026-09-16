@@ -22,6 +22,10 @@ rename (still using the legacy `fire_frameN_*` labels) is also supported.
 - **Pixel editor** - Pencil, flood fill, and line tools for a 12x21
   multicolour sprite (2 bits/pixel: transparent, MC1, Individual, MC2), with
   optional left/right mirroring while you draw.
+- **Multicolour/hires per sprite** - Any pool piece can independently be
+  switched to hires (1 colour, double horizontal resolution - 24x21 instead
+  of 12x21), matching the real VIC's per-sprite $d01c bit. Toggled from the
+  toolbar for whichever piece Single Sprite View currently has open.
 - **Flat sprite pool** - Any number of independent 12x21 art pieces, fully
   decoupled from how many animation frames exist. Any hardware sprite in any
   frame can reference any piece, so art is reused freely instead of being
@@ -49,9 +53,10 @@ rename (still using the legacy `fire_frameN_*` labels) is also supported.
   symbols.
 - **Export**
   - ASM source (`MagSpriteEd_Sprites_Data.s`-style), one label per sprite piece.
-  - Deduplicated/optimized ASM plus composition tables (positions and
-    per-frame Sprite # arrays), for a build that reads the animation back
-    out of tables instead of hand-written code.
+  - Deduplicated/optimized ASM plus composition tables (positions,
+    per-frame Sprite # arrays, and a per-sprite hires/multicolour flag
+    table), for a build that reads the animation back out of tables
+    instead of hand-written code.
   - Raw binary (`.bin`).
 
 ## Requirements

@@ -134,5 +134,8 @@ internal sealed class AboutDialog : Form
         "\r\n" +
         "TOOLS\r\n" +
         "  Pencil / Fill / Line     Left = paint, right = erase\r\n" +
-        "  Mirror                   Mirrors every stroke left/right while enabled";
+        "  Mirror                   Mirrors every stroke left/right while enabled\r\n" +
+        "  Multicolour/Hires        Toggles the CURRENTLY EDITED sprite between 4-colour\r\n" +
+        "                           double-width pixels and 1-colour double-resolution\r\n" +
+        "                           pixels - a per-sprite setting, like a real C64's $d01c";
 }

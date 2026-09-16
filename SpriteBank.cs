@@ -43,11 +43,24 @@ public sealed class SpriteBank
 
     private byte[][,] _pixels; // [piece][row, col], row 0..20, col 0..11
 
+    // Per-piece hires flag - see IsHires/SetHires and the GetHiresPixel/
+    // SetHiresPixel accessors below. Purely an alternate INTERPRETATION of
+    // the exact same raw storage above: on real VIC hardware a multicolour
+    // sprite's raw bytes are identical in size/layout to a hires sprite's
+    // (3 bytes/row either way) - only whether the chip reads 2 bits as one
+    // 4-colour pixel or 1 bit as one 2-colour pixel differs, controlled by
+    // $d01c per hardware sprite. So flipping this flag never touches
+    // _pixels at all, and toggling it back and forth is always lossless -
+    // whatever was drawn under the old interpretation is simply read back
+    // under the new one (see GetHiresPixel's bit packing).
+    private bool[] _hires;
+
     public SpriteBank(int pieceCount)
     {
         if (pieceCount < 1) throw new ArgumentOutOfRangeException(nameof(pieceCount));
         PieceCount = pieceCount;
         _pixels = new byte[pieceCount][,];
+        _hires = new bool[pieceCount];
         for (int p = 0; p < pieceCount; p++)
             _pixels[p] = new byte[QuadRows, QuadCols];
     }
@@ -58,6 +71,39 @@ public sealed class SpriteBank
     {
         if (value > 3) value = 3;
         _pixels[piece][row, col] = value;
+    }
+
+    public bool IsHires(int piece) => _hires[piece];
+    public void SetHires(int piece, bool hires) => _hires[piece] = hires;
+
+    // ---------------------------------------------------------------------
+    // Hires bit accessors - 24 single-bit columns (0=transparent, 1=the
+    // sprite's one colour, from the same per-sprite $d027-$d02e register
+    // "Individual" already uses) instead of 12 double-width 2-bit columns.
+    // Each existing 0-3 cell packs its 2 raw bits as two independent hires
+    // pixels: the high bit (value 2) is the spatially LEFT one, the low bit
+    // (value 1) the RIGHT one - the exact same bit order EmitSprite/
+    // LoadFromCompiled already pack MSB-first, so no export/import code
+    // needs to change: a hires piece's raw bytes are already correct the
+    // moment its pixels are drawn this way.
+    // ---------------------------------------------------------------------
+    public const int HiresCols = QuadCols * 2;
+
+    public byte GetHiresPixel(int piece, int row, int col24)
+    {
+        byte cell = _pixels[piece][row, col24 / 2];
+        bool left = (col24 & 1) == 0;
+        return (byte)(left ? (cell >> 1) & 1 : cell & 1);
+    }
+
+    public void SetHiresPixel(int piece, int row, int col24, byte value)
+    {
+        int col12 = col24 / 2;
+        bool left = (col24 & 1) == 0;
+        byte cell = _pixels[piece][row, col12];
+        byte bit = (byte)(value & 1);
+        cell = left ? (byte)((cell & 0b01) | (bit << 1)) : (byte)((cell & 0b10) | bit);
+        _pixels[piece][row, col12] = cell;
     }
 
     public byte[,] Piece(int piece) => _pixels[piece];
@@ -81,9 +127,14 @@ public sealed class SpriteBank
     {
         if (newPieceCount < 1) newPieceCount = 1;
         var newPixels = new byte[newPieceCount][,];
+        var newHires = new bool[newPieceCount];
         for (int p = 0; p < newPieceCount; p++)
+        {
             newPixels[p] = p < PieceCount ? _pixels[p] : new byte[QuadRows, QuadCols];
+            newHires[p] = p < PieceCount && _hires[p];
+        }
         _pixels = newPixels;
+        _hires = newHires;
         PieceCount = newPieceCount;
     }
 
@@ -117,6 +168,11 @@ public sealed class SpriteBank
 
     public void GenerateProceduralPiece(int piece)
     {
+        // The flame silhouette is inherently a multicolour pattern (it
+        // uses all 3 non-transparent values) - resetting "to procedural"
+        // always returns a piece to that default, rather than leaving it
+        // hires and reinterpreting these bytes as scrambled hires pixels.
+        _hires[piece] = false;
         double phase = piece * (2 * Math.PI / Math.Max(1, PieceCount));
         var grid = _pixels[piece];
         for (int row = 0; row < QuadRows; row++)
@@ -383,6 +439,12 @@ public sealed class SpriteBank
         public int PieceCount { get; set; }
         public byte[][][] Pieces { get; set; } = Array.Empty<byte[][]>();
 
+        // Per-piece hires flag (see SpriteBank.IsHires). Absent/shorter than
+        // PieceCount in an older project file - FromData below just leaves
+        // those pieces at their default false (multicolour), matching what
+        // every piece already effectively was before this flag existed.
+        public bool[] Hires { get; set; } = Array.Empty<bool>();
+
         // Legacy (pre flat-pool) shape - only ever populated by an OLD
         // project file being deserialized, never written by ExportData.
         public int FrameCount { get; set; }
@@ -391,7 +453,7 @@ public sealed class SpriteBank
 
     public SpriteBankData ExportData()
     {
-        var data = new SpriteBankData { PieceCount = PieceCount, Pieces = new byte[PieceCount][][] };
+        var data = new SpriteBankData { PieceCount = PieceCount, Pieces = new byte[PieceCount][][], Hires = new bool[PieceCount] };
         for (int p = 0; p < PieceCount; p++)
         {
             data.Pieces[p] = new byte[QuadRows][];
@@ -401,6 +463,7 @@ public sealed class SpriteBank
                 for (int c = 0; c < QuadCols; c++)
                     data.Pieces[p][r][c] = _pixels[p][r, c];
             }
+            data.Hires[p] = _hires[p];
         }
         return data;
     }
@@ -414,6 +477,8 @@ public sealed class SpriteBank
                 for (int r = 0; r < QuadRows; r++)
                     for (int c = 0; c < QuadCols; c++)
                         bank._pixels[p][r, c] = data.Pieces[p][r][c];
+            for (int p = 0; p < data.PieceCount && p < data.Hires.Length; p++)
+                bank._hires[p] = data.Hires[p];
             return bank;
         }
 

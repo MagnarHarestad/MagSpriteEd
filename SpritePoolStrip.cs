@@ -46,9 +46,14 @@ internal sealed class SpritePoolStrip : Control
     public int PieceCount { get; private set; }
     public int SelectedPiece { get; private set; } = -1;
 
-    /// <summary>piece, row, col -> pixel value (0..3).</summary>
+    /// <summary>piece, row, col (0..11) -> raw 2-bit cell value (0..3).</summary>
     public Func<int, int, int, byte>? PixelProvider { get; set; }
     public Func<byte, Color>? PaletteProvider { get; set; }
+    /// <summary>piece -> whether it's currently a hires (not multicolour)
+    /// piece - see SpriteBank.IsHires. Each piece can independently be
+    /// either, so this is checked per piece drawn, not once for the whole
+    /// strip.</summary>
+    public Func<int, bool>? IsHiresProvider { get; set; }
 
     /// <summary>Raised on left-click of a thumbnail, with its piece index.</summary>
     public event Action<int>? PieceClicked;
@@ -110,14 +115,38 @@ internal sealed class SpritePoolStrip : Control
             // read as a plain colour silhouette, not edited directly.
             using (var bg = new SolidBrush(Color.FromArgb(30, 30, 30)))
                 g.FillRectangle(bg, Pad, thumbTop, ThumbWidth, ThumbHeight);
-            for (int r = 0; r < Rows; r++)
+
+            bool hires = IsHiresProvider?.Invoke(p) ?? false;
+            if (hires)
             {
-                for (int c = 0; c < Cols; c++)
+                // Same total physical width either way (24 hires dots wide
+                // on real hardware, same as 12 double-width multicolour
+                // pixels) - just divided into twice as many, half-width,
+                // square cells. Each raw cell's high bit is the left hires
+                // pixel, low bit the right one (see SpriteBank.GetHiresPixel).
+                int hiresCellSize = ThumbWidth / SpriteBank.HiresCols;
+                using var onBrush = new SolidBrush(PaletteProvider?.Invoke(2) ?? Color.Magenta);
+                for (int r = 0; r < Rows; r++)
                 {
-                    byte v = PixelProvider?.Invoke(p, r, c) ?? 0;
-                    if (v == 0) continue;
-                    using var b = new SolidBrush(PaletteProvider?.Invoke(v) ?? Color.Magenta);
-                    g.FillRectangle(b, Pad + c * ThumbCellWidth, thumbTop + r * ThumbCellHeight, ThumbCellWidth, ThumbCellHeight);
+                    for (int c = 0; c < Cols; c++)
+                    {
+                        byte v = PixelProvider?.Invoke(p, r, c) ?? 0;
+                        if ((v & 2) != 0) g.FillRectangle(onBrush, Pad + (c * 2) * hiresCellSize, thumbTop + r * ThumbCellHeight, hiresCellSize, ThumbCellHeight);
+                        if ((v & 1) != 0) g.FillRectangle(onBrush, Pad + (c * 2 + 1) * hiresCellSize, thumbTop + r * ThumbCellHeight, hiresCellSize, ThumbCellHeight);
+                    }
+                }
+            }
+            else
+            {
+                for (int r = 0; r < Rows; r++)
+                {
+                    for (int c = 0; c < Cols; c++)
+                    {
+                        byte v = PixelProvider?.Invoke(p, r, c) ?? 0;
+                        if (v == 0) continue;
+                        using var b = new SolidBrush(PaletteProvider?.Invoke(v) ?? Color.Magenta);
+                        g.FillRectangle(b, Pad + c * ThumbCellWidth, thumbTop + r * ThumbCellHeight, ThumbCellWidth, ThumbCellHeight);
+                    }
                 }
             }
 

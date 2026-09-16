@@ -26,10 +26,16 @@ internal sealed class PositionedEditCanvas : Control
 
     /// <summary>spriteIndex -> (x, y) in VIC sprite-register space.</summary>
     public Func<int, (int x, int y)>? PositionProvider { get; set; }
-    /// <summary>(spriteIndex, row 0..20, col 0..11) -> pixel value 0..3.</summary>
+    /// <summary>(spriteIndex, row 0..20, col 0..11) -> raw 2-bit cell value 0..3.</summary>
     public Func<int, int, int, byte>? SpritePixel { get; set; }
     /// <summary>(pixel value, spriteIndex) -> colour.</summary>
     public Func<byte, int, Color>? PaletteProvider { get; set; }
+    /// <summary>spriteIndex -> whether the piece it currently shows is
+    /// hires rather than multicolour - see SpriteBank.IsHires. Also
+    /// switches CellInteract's own col range: 0..11 normally, 0..23 for a
+    /// hires sprite (MainForm's PositionedCanvas_CellInteract checks the
+    /// same flag to know which SpriteBank accessor to call).</summary>
+    public Func<int, bool>? IsSpriteHires { get; set; }
 
     /// <summary>spriteIndex, row, col, mouse button - only raised for a hit on a sprite.</summary>
     public event Action<int, int, int, MouseButtons>? CellInteract;
@@ -78,14 +84,34 @@ internal sealed class PositionedEditCanvas : Control
             var (x, y) = PositionProvider(s);
             float screenX = (x - 24) * Zoom + _panX;
             float screenY = (y - 50) * Zoom + _panY;
+            bool hires = IsSpriteHires?.Invoke(s) ?? false;
             for (int r = 0; r < 21; r++)
             {
                 for (int c = 0; c < 12; c++)
                 {
                     byte v = SpritePixel(s, r, c);
-                    if (v == 0) continue;
-                    using var brush = new SolidBrush(PaletteProvider(v, s));
-                    g.FillRectangle(brush, screenX + c * 2 * Zoom, screenY + r * Zoom, 2 * Zoom, Zoom);
+                    if (hires)
+                    {
+                        // Same bit packing as ConstructCanvas/SpritePoolStrip -
+                        // high bit left, low bit right - both drawn in the
+                        // one colour a real hires sprite actually has.
+                        if ((v & 2) != 0)
+                        {
+                            using var b1 = new SolidBrush(PaletteProvider(2, s));
+                            g.FillRectangle(b1, screenX + c * 2 * Zoom, screenY + r * Zoom, Zoom, Zoom);
+                        }
+                        if ((v & 1) != 0)
+                        {
+                            using var b2 = new SolidBrush(PaletteProvider(2, s));
+                            g.FillRectangle(b2, screenX + (c * 2 + 1) * Zoom, screenY + r * Zoom, Zoom, Zoom);
+                        }
+                    }
+                    else
+                    {
+                        if (v == 0) continue;
+                        using var brush = new SolidBrush(PaletteProvider(v, s));
+                        g.FillRectangle(brush, screenX + c * 2 * Zoom, screenY + r * Zoom, 2 * Zoom, Zoom);
+                    }
                 }
             }
             using var pen = new Pen(Color.FromArgb(120, 180, 255), 1);
@@ -134,7 +160,10 @@ internal sealed class PositionedEditCanvas : Control
         {
             var rect = SpriteRect(s);
             if (!rect.Contains(e.Location)) continue;
-            int col = Math.Clamp((int)((e.X - rect.X) / Zoom / 2), 0, 11);
+            bool hires = IsSpriteHires?.Invoke(s) ?? false;
+            int col = hires
+                ? Math.Clamp((int)((e.X - rect.X) / Zoom), 0, SpriteBank.HiresCols - 1)
+                : Math.Clamp((int)((e.X - rect.X) / Zoom / 2), 0, 11);
             int row = Math.Clamp((int)((e.Y - rect.Y) / Zoom), 0, 20);
             if (s == _lastSprite && row == _lastRow && col == _lastCol) return;
             _lastSprite = s; _lastRow = row; _lastCol = col;

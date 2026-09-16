@@ -17,7 +17,7 @@ namespace MagSpriteEd;
 internal sealed class PixelGridControl : Control
 {
     public int Rows { get; }
-    public int Cols { get; }
+    public int Cols { get; private set; }
     public int CellWidth { get; private set; }
     public int CellHeight { get; private set; }
     public bool Interactive { get; set; } = true;
@@ -47,15 +47,23 @@ internal sealed class PixelGridControl : Control
     }
 
     /// <summary>Re-zooms to a new cell size - used by MainForm to fit the
-    /// whole 12x21 grid into whatever space is actually available as the
-    /// window resizes, instead of a fixed zoom level that may need a
-    /// horizontal scrollbar at typical window widths.</summary>
-    public void SetCellSize(int cellWidth, int cellHeight)
+    /// whole grid into whatever space is actually available as the window
+    /// resizes, instead of a fixed zoom level that may need a horizontal
+    /// scrollbar at typical window widths.</summary>
+    public void SetCellSize(int cellWidth, int cellHeight) => Reconfigure(Cols, cellWidth, cellHeight);
+
+    /// <summary>Re-zooms AND changes the column count - used when switching
+    /// the piece being edited between multicolour (12 double-width columns)
+    /// and hires (24 square columns) drawing, which are different grids
+    /// over the exact same underlying pixel storage (see SpriteBank's
+    /// GetHiresPixel remarks).</summary>
+    public void Reconfigure(int cols, int cellWidth, int cellHeight)
     {
-        if (cellWidth == CellWidth && cellHeight == CellHeight) return;
+        if (cols == Cols && cellWidth == CellWidth && cellHeight == CellHeight) return;
+        Cols = cols;
         CellWidth = cellWidth;
         CellHeight = cellHeight;
-        Size = new Size(Cols * cellWidth + 1, Rows * cellHeight + 1);
+        Size = new Size(cols * cellWidth + 1, Rows * cellHeight + 1);
         Invalidate();
     }
 

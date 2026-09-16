@@ -75,6 +75,13 @@ public sealed class MainForm : Form
 
     private ToolStripButton[] _swatchButtons = null!;
     private ToolStripButton _pencilBtn = null!, _fillBtn = null!, _lineBtn = null!, _mirrorBtn = null!;
+    private ToolStripButton _hiresBtn = null!;
+    // Guards _hiresBtn's CheckedChanged while SyncHiresButton programmatically
+    // updates it to match whatever piece _editPiece just became - otherwise
+    // that would immediately write the just-READ flag back via SetHires,
+    // harmless but pointless, and would fight a real user click's own
+    // pending Checked value in some reentrant edge cases.
+    private bool _suppressHiresEvent;
 
     private byte[,]? _clipboard;
 
@@ -161,7 +168,13 @@ public sealed class MainForm : Form
         // place over the backdrop, panned with middle-drag) ----
         _canvas = new PixelGridControl(SpriteBank.QuadRows, SpriteBank.QuadCols, MaxEditCellHeight * 2, MaxEditCellHeight)
         {
-            PixelProvider = (r, c) => _bank.Get(_editPiece, r, c),
+            // Hires "on" is remapped to value 2 (Individual) purely for
+            // colour lookup - PaletteColor/EditorPalette have no separate
+            // concept of a hires colour, since a hires sprite's one colour
+            // IS that same per-sprite Individual register on real hardware.
+            PixelProvider = (r, c) => _bank.IsHires(_editPiece)
+                ? (_bank.GetHiresPixel(_editPiece, r, c) != 0 ? (byte)2 : (byte)0)
+                : _bank.Get(_editPiece, r, c),
             PaletteProvider = PaletteColor
         };
         _canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(12, 12, 12), Padding = new Padding(20) };
@@ -189,6 +202,11 @@ public sealed class MainForm : Form
                 2 => IndividualPaletteIndex[s] == 8 ? Color.FromArgb(133, 76, 27) : Color.FromArgb(175, 101, 94),
                 3 => Color.FromArgb(214, 225, 132),
                 _ => Color.Transparent
+            },
+            IsSpriteHires = s =>
+            {
+                int source = _constructPanel.GetSpriteSource(_currentFrame, s);
+                return source >= 0 && source < _bank.PieceCount && _bank.IsHires(source);
             }
         };
 
@@ -203,7 +221,8 @@ public sealed class MainForm : Form
         _spritePoolStrip = new SpritePoolStrip
         {
             PixelProvider = (piece, r, c) => _bank.Get(piece, r, c),
-            PaletteProvider = PaletteColor
+            PaletteProvider = PaletteColor,
+            IsHiresProvider = piece => _bank.IsHires(piece)
         };
         _spritePoolStrip.PieceClicked += piece =>
         {
@@ -387,6 +406,30 @@ public sealed class MainForm : Form
         EditorPalette.Changed += () => { UpdateSwatchIcons(); _canvas.Invalidate(); };
         UpdateSwatchIcons();
 
+        // -- Multicolour/hires toggle for the piece Single Sprite View is
+        // currently editing - see SpriteBank.IsHires. CheckOnClick's own
+        // CheckedChanged fires AFTER Checked is already updated, so the
+        // handler just reads it straight off the button. ---
+        _hiresBtn = new ToolStripButton
+        {
+            Image = Icons.Multicolor(),
+            DisplayStyle = ToolStripItemDisplayStyle.Image,
+            CheckOnClick = true,
+            ToolTipText = "Multicolour sprite (click to switch this sprite to hires)"
+        };
+        _hiresBtn.CheckedChanged += (_, _) =>
+        {
+            _hiresBtn.Image = _hiresBtn.Checked ? Icons.Hires() : Icons.Multicolor();
+            _hiresBtn.ToolTipText = _hiresBtn.Checked
+                ? "Hires sprite - single colour, double horizontal resolution (click to switch this sprite to multicolour)"
+                : "Multicolour sprite (click to switch this sprite to hires)";
+            if (_suppressHiresEvent) return;
+            _bank.SetHires(_editPiece, _hiresBtn.Checked);
+            FitCanvasToScrollArea();
+            RefreshAll();
+        };
+        _toolbar.Items.Add(_hiresBtn);
+
         _toolbar.Items.Add(new ToolStripSeparator());
 
         // -- Tool selection --
@@ -561,20 +604,43 @@ public sealed class MainForm : Form
     }
 
     /// <summary>Picks the largest cell size (bounded by Min/MaxEditCellHeight)
-    /// that still fits the whole 12x21 grid into _canvasScroll's current
-    /// client area without needing a horizontal scrollbar - see its
-    /// SizeChanged wiring in BuildUi and the initial calls in the
-    /// constructor.</summary>
+    /// that still fits the whole grid into _canvasScroll's current client
+    /// area without needing a horizontal scrollbar, and reconfigures the
+    /// canvas for whichever of multicolour (12 double-width columns) or
+    /// hires (24 square columns) _editPiece currently is - both cover the
+    /// exact same total physical width (24 hires-dot-widths either way), so
+    /// the same "unit" size drives both column counts. Called on resize,
+    /// when Positioned view hands the area back, and whenever _editPiece or
+    /// its hires flag changes (see RefreshAll/SyncHiresButton).</summary>
     private void FitCanvasToScrollArea()
     {
         int availW = _canvasScroll.ClientSize.Width - _canvasScroll.Padding.Horizontal;
         int availH = _canvasScroll.ClientSize.Height - _canvasScroll.Padding.Vertical;
         if (availW <= 0 || availH <= 0) return;
-        int byWidth = availW / (SpriteBank.QuadCols * 2); // cell width is 2x cell height
+        int byWidth = availW / SpriteBank.HiresCols;
         int byHeight = availH / SpriteBank.QuadRows;
-        int cellHeight = Math.Clamp(Math.Min(byWidth, byHeight), MinEditCellHeight, MaxEditCellHeight);
-        _canvas.SetCellSize(cellHeight * 2, cellHeight);
+        int unit = Math.Clamp(Math.Min(byWidth, byHeight), MinEditCellHeight, MaxEditCellHeight);
+        if (_bank.IsHires(_editPiece)) _canvas.Reconfigure(SpriteBank.HiresCols, unit, unit);
+        else _canvas.Reconfigure(SpriteBank.QuadCols, unit * 2, unit);
         _canvas.Location = new Point(_canvasScroll.Padding.Left, _canvasScroll.Padding.Top);
+    }
+
+    /// <summary>Reflects _editPiece's current hires flag onto the toolbar
+    /// toggle without re-triggering its own CheckedChanged side effects
+    /// (which would just write the same flag back and re-fit again -
+    /// harmless, but pointless work on every single pixel edit since
+    /// RefreshAll calls this unconditionally).</summary>
+    private void SyncHiresButton()
+    {
+        bool hires = _bank.IsHires(_editPiece);
+        if (_hiresBtn.Checked == hires) return;
+        _suppressHiresEvent = true;
+        try { _hiresBtn.Checked = hires; }
+        finally { _suppressHiresEvent = false; }
+        _hiresBtn.Image = hires ? Icons.Hires() : Icons.Multicolor();
+        _hiresBtn.ToolTipText = hires
+            ? "Hires sprite - single colour, double horizontal resolution (click to switch this sprite to multicolour)"
+            : "Multicolour sprite (click to switch this sprite to hires)";
     }
 
     private void SetPositionedMode(bool positioned)
@@ -714,26 +780,42 @@ public sealed class MainForm : Form
         _lineStartCol = -1;
     }
 
+    /// <summary>Writes one pixel through whichever of SpriteBank's two
+    /// accessors matches the piece's current mode - multicolour's Set
+    /// takes the palette value (0-3) directly, hires's SetHiresPixel just
+    /// wants "on or off" (any non-transparent palette value counts as on),
+    /// since a hires sprite only ever has the one colour to begin with.</summary>
+    private void SetPixel(int piece, bool hires, int row, int col, byte paletteColor)
+    {
+        if (hires) _bank.SetHiresPixel(piece, row, col, paletteColor != 0 ? (byte)1 : (byte)0);
+        else _bank.Set(piece, row, col, paletteColor);
+    }
+
     private void Canvas_CellInteract(int row, int col, MouseButtons button)
     {
         if (button != MouseButtons.Left && button != MouseButtons.Right) return;
         _hoverRow = row;
         _hoverCol = col;
+        bool hires = _bank.IsHires(_editPiece);
 
         switch (_tool)
         {
             case Tool.Pencil:
                 {
                     byte color = (button == MouseButtons.Right) ? (byte)0 : _selectedColor;
-                    _bank.Set(_editPiece, row, col, color);
-                    if (_mirror) _bank.Set(_editPiece, row, SpriteBank.QuadCols - 1 - col, color);
+                    SetPixel(_editPiece, hires, row, col, color);
+                    if (_mirror)
+                    {
+                        int maxCol = hires ? SpriteBank.HiresCols : SpriteBank.QuadCols;
+                        SetPixel(_editPiece, hires, row, maxCol - 1 - col, color);
+                    }
                     RefreshAll();
                     break;
                 }
             case Tool.Fill:
                 {
                     byte color = (button == MouseButtons.Right) ? (byte)0 : _selectedColor;
-                    FloodFill(row, col, color);
+                    FloodFill(_editPiece, hires, row, col, color);
                     RefreshAll();
                     break;
                 }
@@ -755,6 +837,7 @@ public sealed class MainForm : Form
 
         int source = _constructPanel.GetSpriteSource(_currentFrame, spriteIndex);
         source = EnsureExclusiveSlot(_currentFrame, spriteIndex, source);
+        bool hires = _bank.IsHires(source);
 
         // One undo snapshot per distinct piece touched in this stroke (a
         // drag can cross from one sprite into another, possibly resolving
@@ -769,21 +852,35 @@ public sealed class MainForm : Form
                 // Line is simplified to paint-per-cell here rather than
                 // tracking its own start/end drag a second time - keeps this
                 // view's hit-testing/undo logic from having to duplicate the
-                // flat editor's separate line-preview machinery.
-                _bank.Set(source, row, col, color);
-                if (_mirror) _bank.Set(source, row, SpriteBank.QuadCols - 1 - col, color);
+                // flat editor's separate line-preview machinery. col already
+                // arrives in the right 0..11/0..23 range for this piece's
+                // mode - PositionedEditCanvas's own hit-testing checks the
+                // same IsSpriteHires flag.
+                SetPixel(source, hires, row, col, color);
+                if (_mirror)
+                {
+                    int maxCol = hires ? SpriteBank.HiresCols : SpriteBank.QuadCols;
+                    SetPixel(source, hires, row, maxCol - 1 - col, color);
+                }
                 break;
             case Tool.Fill:
-                FloodFill(source, row, col, color);
+                FloodFill(source, hires, row, col, color);
                 break;
         }
         RefreshAll();
     }
 
     /// <summary>Flood fill within one piece - piece/localRow/localCol pick
-    /// which 12x21 art piece and where within it. Never spills into
-    /// another piece, since each is now its own independent canvas.</summary>
-    private void FloodFill(int piece, int localRow, int localCol, byte newColor)
+    /// which art piece and where within it (0..11 for multicolour, 0..23
+    /// for hires - see SetPixel). Never spills into another piece, since
+    /// each is now its own independent canvas.</summary>
+    private void FloodFill(int piece, bool hires, int localRow, int localCol, byte newColor)
+    {
+        if (hires) FloodFillHires(piece, localRow, localCol, newColor != 0 ? (byte)1 : (byte)0);
+        else FloodFillMulticolor(piece, localRow, localCol, newColor);
+    }
+
+    private void FloodFillMulticolor(int piece, int localRow, int localCol, byte newColor)
     {
         var grid = _bank.Piece(piece);
         byte target = grid[localRow, localCol];
@@ -803,21 +900,39 @@ public sealed class MainForm : Form
         }
     }
 
-    /// <summary>Flood fill within Single Sprite View's own edit target.</summary>
-    private void FloodFill(int localRow, int localCol, byte newColor) => FloodFill(_editPiece, localRow, localCol, newColor);
+    private void FloodFillHires(int piece, int localRow, int localCol, byte newValue)
+    {
+        byte target = _bank.GetHiresPixel(piece, localRow, localCol);
+        if (target == newValue) return;
+        var stack = new Stack<(int r, int c)>();
+        stack.Push((localRow, localCol));
+        while (stack.Count > 0)
+        {
+            var (r, c) = stack.Pop();
+            if (r < 0 || r >= SpriteBank.QuadRows || c < 0 || c >= SpriteBank.HiresCols) continue;
+            if (_bank.GetHiresPixel(piece, r, c) != target) continue;
+            _bank.SetHiresPixel(piece, r, c, newValue);
+            stack.Push((r + 1, c));
+            stack.Push((r - 1, c));
+            stack.Push((r, c + 1));
+            stack.Push((r, c - 1));
+        }
+    }
 
     private void DrawLine(int r0, int c0, int r1, int c1, byte color)
     {
+        bool hires = _bank.IsHires(_editPiece);
+        int maxCol = hires ? SpriteBank.HiresCols : SpriteBank.QuadCols;
         int dr = Math.Abs(r1 - r0), dc = Math.Abs(c1 - c0);
         int sr = r0 < r1 ? 1 : -1, sc = c0 < c1 ? 1 : -1;
         int err = dr - dc;
         int r = r0, c = c0;
         while (true)
         {
-            if (r >= 0 && r < SpriteBank.QuadRows && c >= 0 && c < SpriteBank.QuadCols)
+            if (r >= 0 && r < SpriteBank.QuadRows && c >= 0 && c < maxCol)
             {
-                _bank.Set(_editPiece, r, c, color);
-                if (_mirror) _bank.Set(_editPiece, r, SpriteBank.QuadCols - 1 - c, color);
+                SetPixel(_editPiece, hires, r, c, color);
+                if (_mirror) SetPixel(_editPiece, hires, r, maxCol - 1 - c, color);
             }
             if (r == r1 && c == c1) break;
             int e2 = 2 * err;
@@ -830,6 +945,23 @@ public sealed class MainForm : Form
 
     private void FlipHorizontalPiece()
     {
+        // Hires needs a bit-level mirror across all 24 columns, not a
+        // whole-cell swap: each raw cell packs 2 DIFFERENT hires columns
+        // (see SpriteBank.GetHiresPixel), so swapping whole cells would
+        // pair up the wrong two columns instead of properly mirroring.
+        if (_bank.IsHires(_editPiece))
+        {
+            for (int r = 0; r < SpriteBank.QuadRows; r++)
+                for (int c = 0; c < SpriteBank.HiresCols / 2; c++)
+                {
+                    int c2 = SpriteBank.HiresCols - 1 - c;
+                    byte a = _bank.GetHiresPixel(_editPiece, r, c);
+                    byte b = _bank.GetHiresPixel(_editPiece, r, c2);
+                    _bank.SetHiresPixel(_editPiece, r, c, b);
+                    _bank.SetHiresPixel(_editPiece, r, c2, a);
+                }
+            return;
+        }
         var grid = _bank.Piece(_editPiece);
         for (int r = 0; r < SpriteBank.QuadRows; r++)
             for (int c = 0; c < SpriteBank.QuadCols / 2; c++)
@@ -913,6 +1045,10 @@ public sealed class MainForm : Form
         for (int r = 0; r < SpriteBank.QuadRows; r++)
             for (int c = 0; c < SpriteBank.QuadCols; c++)
                 _bank.Set(toPiece, r, c, _bank.Get(fromPiece, r, c));
+        // Otherwise a fork/relocation of a hires piece would silently land
+        // on a fresh (always-multicolour) slot and reinterpret its bytes
+        // under the wrong mode the moment you start drawing on it.
+        _bank.SetHires(toPiece, _bank.IsHires(fromPiece));
     }
 
     /// <summary>True if any (animation frame, hardware sprite) pair other
@@ -1081,6 +1217,8 @@ public sealed class MainForm : Form
 
     private void RefreshAll()
     {
+        SyncHiresButton();
+        FitCanvasToScrollArea();
         _canvas.Invalidate();
         _positionedCanvas.Invalidate();
         RefreshStatus(null);

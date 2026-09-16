@@ -145,6 +145,12 @@ public sealed class ConstructPanel : UserControl
                 2 => IndividualPaletteIndex[spriteIdx] == 8 ? Color.FromArgb(133, 76, 27) : Color.FromArgb(175, 101, 94),
                 3 => Color.FromArgb(214, 225, 132),
                 _ => Color.Transparent
+            },
+            IsSpriteHires = spriteIdx =>
+            {
+                var bank = _bankProvider();
+                int source = _spriteSource[_frame][spriteIdx];
+                return source >= 0 && source < bank.PieceCount && bank.IsHires(source);
             }
         };
         _canvas.ApplyZoomedSize();
@@ -1018,6 +1024,20 @@ public sealed class ConstructPanel : UserControl
         sb.AppendLine($"var magspriteed_opt_sprite_count = {dedup.CanonicalCount}");
         sb.AppendLine($"var magspriteed_opt_frame_count = {_animFrameCount}");
         sb.AppendLine($"var magspriteed_opt_pingpong = {(_pingPongCheck.Checked ? 1 : 0)}");
+        sb.AppendLine();
+
+        // Per-canonical-sprite hires flag (see SpriteBank.IsHires) - 1 byte
+        // per distinct piece above, in the same canonical order, for the
+        // build to set/clear that sprite's $d01c multicolour bit whenever
+        // magspriteed_ptr_table below points a hardware sprite at it.
+        sb.AppendLine("magspriteed_opt_hires:");
+        sb.Append("        .byte ");
+        for (int i = 0; i < dedup.CanonicalCount; i++)
+        {
+            sb.Append(bank.IsHires(dedup.CanonicalToSlot[i]) ? 1 : 0);
+            if (i < dedup.CanonicalCount - 1) sb.Append(',');
+        }
+        sb.AppendLine();
         sb.AppendLine();
 
         for (int i = 0; i < dedup.CanonicalCount; i++)
