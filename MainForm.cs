@@ -24,10 +24,20 @@ public sealed class MainForm : Form
     private int _currentFrame;
 
     // Single Sprite View's edit target: one piece index into the bank's
-    // flat pool. Set by clicking a hardware sprite in Construct (see
-    // SelectedSpriteSourceChanged below); defaults to the pool's first
-    // piece before anything's been clicked.
+    // flat pool. Set either by clicking a hardware sprite in Construct (see
+    // SelectedSpriteSourceChanged below) or by clicking a thumbnail in the
+    // pool strip to its left (see _spritePoolStrip.PieceClicked); defaults
+    // to the pool's first piece before anything's been clicked.
     private int _editPiece;
+
+    // The hardware sprite (Construct's PrimarySelectedSprite) _editPiece is
+    // currently "owned by", for EnsureExclusiveEditTarget's copy-on-write
+    // check - cached at selection time rather than re-queried live, because
+    // it must be -1 (no owner - never auto-fork) when _editPiece was picked
+    // directly from the pool strip instead of following Construct's
+    // selection, even though Construct's own PrimarySelectedSprite may
+    // still point at something else entirely at that moment.
+    private int _editPieceOwnerSprite = -1;
 
     private enum Tool { Pencil, Fill, Line }
     private Tool _tool = Tool.Pencil;
@@ -46,6 +56,8 @@ public sealed class MainForm : Form
     private ToolStrip _toolbar = null!;
     private PixelGridControl _canvas = null!;
     private Panel _canvasScroll = null!;
+    private SpritePoolStrip _spritePoolStrip = null!;
+    private Panel _spritePoolScroll = null!;
     private PositionedEditCanvas _positionedCanvas = null!;
     private ToolStripButton _positionedModeBtn = null!;
     private readonly HashSet<int> _positionedStrokePieces = new();
@@ -169,6 +181,43 @@ public sealed class MainForm : Form
         centerHost.Controls.Add(_positionedCanvas);
         centerHost.Controls.Add(_canvasScroll);
 
+        // ---- Far left: vertical strip of every pool piece as a small
+        // thumbnail (Single Sprite View only - hidden in Positioned view,
+        // see SetPositionedMode). Click one to make it Single Sprite View's
+        // edit target; thumbnails update live while drawing via RefreshAll. ----
+        _spritePoolStrip = new SpritePoolStrip
+        {
+            PixelProvider = (piece, r, c) => _bank.Get(piece, r, c),
+            PaletteProvider = PaletteColor
+        };
+        _spritePoolStrip.PieceClicked += piece =>
+        {
+            _editPiece = piece;
+            _editPieceOwnerSprite = -1; // no known Construct owner - never auto-fork this selection
+            _spritePoolStrip.SetSelected(piece);
+            RefreshAll();
+        };
+        _spritePoolScroll = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            BackColor = Color.FromArgb(12, 12, 12),
+            Padding = new Padding(2)
+        };
+        _spritePoolScroll.Controls.Add(_spritePoolStrip);
+
+        var editArea = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = BackColor
+        };
+        editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SpritePoolStrip.PreferredWidth + 4));
+        editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        editArea.Controls.Add(_spritePoolScroll, 0, 0);
+        editArea.Controls.Add(centerHost, 1, 0);
+
         // ---- Right: embedded Construct panel (placement/composition over
         // the backdrop) - also the sole frame navigator now; the FRAMES
         // thumbnail strip was removed in favour of its Timeline. ----
@@ -189,16 +238,38 @@ public sealed class MainForm : Form
             if (target is { } piece)
             {
                 _editPiece = piece;
+                _editPieceOwnerSprite = _constructPanel.PrimarySelectedSprite;
+                _spritePoolStrip.SetSelected(piece);
+                ScrollPoolStripToSelection();
                 RefreshAll();
             }
         };
 
-        root.Controls.Add(centerHost, 0, 0);
+        root.Controls.Add(editArea, 0, 0);
         root.Controls.Add(_constructPanel, 1, 0);
 
         Controls.Add(root);
         Controls.Add(status);
         Controls.Add(_toolbar);
+
+        _spritePoolStrip.SetPieceCount(_bank.PieceCount);
+        _spritePoolStrip.SetSelected(_editPiece);
+    }
+
+    /// <summary>Scrolls the pool strip's host panel just enough to bring the
+    /// currently-selected piece's thumbnail fully into view - used whenever
+    /// selection changes via Construct rather than a direct click in the
+    /// strip itself (a direct click is already visible, since that's what
+    /// was just clicked).</summary>
+    private void ScrollPoolStripToSelection()
+    {
+        if (_editPiece < 0 || _editPiece >= _spritePoolStrip.PieceCount) return;
+        int top = _spritePoolStrip.PieceTop(_editPiece);
+        int bottom = _spritePoolStrip.PieceBottom(_editPiece);
+        int viewTop = -_spritePoolScroll.AutoScrollPosition.Y;
+        int viewHeight = _spritePoolScroll.ClientSize.Height;
+        if (top < viewTop) _spritePoolScroll.AutoScrollPosition = new Point(0, top);
+        else if (bottom > viewTop + viewHeight) _spritePoolScroll.AutoScrollPosition = new Point(0, bottom - viewHeight);
     }
 
     // ---------------------------------------------------------------------
@@ -380,6 +451,7 @@ public sealed class MainForm : Form
         {
             if (!TryApplyPoolSize((int)_poolCountUpDown.Value)) { _poolCountUpDown.Value = _bank.PieceCount; return; }
             _editPiece = Math.Min(_editPiece, _bank.PieceCount - 1);
+            _spritePoolStrip.SetPieceCount(_bank.PieceCount);
             _constructPanel.RefreshAfterPoolChange();
             RefreshAll();
             RefreshStatus($"Sprite pool size set to {_bank.PieceCount}.");
@@ -468,6 +540,7 @@ public sealed class MainForm : Form
     private void SetPositionedMode(bool positioned)
     {
         _canvasScroll.Visible = !positioned;
+        _spritePoolScroll.Visible = !positioned;
         _positionedCanvas.Visible = positioned;
         // The icon shows what clicking again will switch TO, not the
         // current state - so it flips to "Single Sprite View" once you're
@@ -480,6 +553,15 @@ public sealed class MainForm : Form
         {
             _positionedCanvas.Backdrop = _backdrop?.Image;
             _positionedCanvas.Invalidate();
+        }
+        else
+        {
+            // Positioned view can have edited pieces the strip never
+            // repainted while hidden (it only tracks _editPiece, not
+            // whichever piece a Positioned-view sprite happened to show) -
+            // refresh every thumbnail once on the way back in.
+            _spritePoolStrip.Invalidate();
+            ScrollPoolStripToSelection();
         }
     }
 
@@ -758,8 +840,12 @@ public sealed class MainForm : Form
     // ---------------------------------------------------------------------
     private void EnsureExclusiveEditTarget()
     {
-        int hwSprite = _constructPanel.PrimarySelectedSprite;
-        int exclusive = EnsureExclusiveSlot(_currentFrame, hwSprite, _editPiece);
+        // Uses the OWNER cached at selection time (_editPieceOwnerSprite),
+        // not a live re-query of Construct's current primary selection -
+        // it's -1 (no owner, never auto-fork) whenever _editPiece was picked
+        // directly from the pool strip, even if Construct still happens to
+        // have some unrelated hardware sprite selected. See its field doc.
+        int exclusive = EnsureExclusiveSlot(_currentFrame, _editPieceOwnerSprite, _editPiece);
         // SetSpriteSource (inside EnsureExclusiveSlot) already updates
         // _editPiece via the SelectedSpriteSourceChanged event when
         // hwSprite is Construct's primary selection, but set it directly
@@ -815,6 +901,7 @@ public sealed class MainForm : Form
 
         int newPiece = _bank.PieceCount;
         _bank.Resize(_bank.PieceCount + 1);
+        _spritePoolStrip.SetPieceCount(_bank.PieceCount);
         RefreshStatus($"Sprite pool grew to {_bank.PieceCount} piece(s) to make room for a forked sprite - every existing piece was already in use.");
         if (!_warnedBankGrowth)
         {
@@ -961,6 +1048,11 @@ public sealed class MainForm : Form
         // data changed, so nudge it explicitly to keep the composited
         // preview live while drawing.
         _constructPanel.RefreshSpriteArt();
+        // Same deal for the pool strip - and its own SetPieceCount is only
+        // called where the pool size can actually change, so this is purely
+        // "redraw whatever's currently on screen, with the current selection".
+        _spritePoolStrip.SetSelected(_editPiece);
+        _spritePoolStrip.Invalidate();
     }
 
     private void RefreshStatus(string? message)
@@ -998,7 +1090,9 @@ public sealed class MainForm : Form
         _undo.Clear(); _redo.Clear();
         _lastPrgPath = null; _lastSymPath = null; _lastProjectPath = null;
         _editPiece = 0;
+        _editPieceOwnerSprite = -1;
         _poolCountUpDown.Value = _bank.PieceCount;
+        _spritePoolStrip.SetPieceCount(_bank.PieceCount);
         _constructPanel.ResetForNewBank(8);
         SelectFrame(0);
         RefreshAll();
@@ -1012,7 +1106,9 @@ public sealed class MainForm : Form
         _undo.Clear(); _redo.Clear();
         _lastPrgPath = null; _lastSymPath = null; _lastProjectPath = null;
         _editPiece = 0;
+        _editPieceOwnerSprite = -1;
         _poolCountUpDown.Value = _bank.PieceCount;
+        _spritePoolStrip.SetPieceCount(_bank.PieceCount);
         _constructPanel.ResetForNewBank(8);
         SelectFrame(0);
         RefreshAll();
@@ -1070,7 +1166,9 @@ public sealed class MainForm : Form
             _lastProjectPath = null;
             _undo.Clear(); _redo.Clear();
             _editPiece = 0;
+            _editPieceOwnerSprite = -1;
             _poolCountUpDown.Value = _bank.PieceCount;
+            _spritePoolStrip.SetPieceCount(_bank.PieceCount);
             int legacyFrames = Math.Max(1, _bank.PieceCount / 4);
             _constructPanel.ResetForNewBank(legacyFrames);
             SelectFrame(0);
@@ -1097,7 +1195,9 @@ public sealed class MainForm : Form
             _lastPrgPath = null; _lastSymPath = null;
             _undo.Clear(); _redo.Clear();
             _editPiece = 0;
+            _editPieceOwnerSprite = -1;
             _poolCountUpDown.Value = _bank.PieceCount;
+            _spritePoolStrip.SetPieceCount(_bank.PieceCount);
             if (result.Construct != null) _constructPanel.ImportData(result.Construct);
             else _constructPanel.ResetForNewBank(Math.Max(1, _bank.PieceCount / 4));
             SelectFrame(0);
