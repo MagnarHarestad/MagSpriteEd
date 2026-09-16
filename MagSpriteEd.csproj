@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>FireSpriteEditor</AssemblyName>
+    <AssemblyName>MagSpriteEd</AssemblyName>
     <RootNamespace>FireSpriteEditor</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationIcon>AppIcon.ico</ApplicationIcon>
