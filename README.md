@@ -7,12 +7,15 @@ everything as 6502 assembly or a raw binary blob ready to `.byte`-include
 into a build.
 
 It was originally built as the in-house sprite tool for a C64 demo's fire
-effect (`PlasmaBollLightningBolts3D`), which is why some naming - the
-`fire_frameN_{tl,tr,bl,br}` export labels, the `FIRE_SPRITES_MANUAL` /
-`FIRE_COMPOSITION_TABLES` build flags - still reflects that origin. The app
-itself has no dependency on that project being present: point it at any
-compiled `.prg`/`.sym` pair or start from a blank/procedural bank, and it
-works entirely standalone.
+effect (`PlasmaBollLightningBolts3D`), which is why the `FIRE_SPRITES_MANUAL` /
+`FIRE_COMPOSITION_TABLES` build flags mentioned below still reflect that
+origin - they're the actual flags that demo's own assembly source expects,
+not something this tool can rename on its own. The app itself has no
+dependency on that project being present, though: point it at any compiled
+`.prg`/`.sym` pair or start from a blank/procedural bank, and it works
+entirely standalone. Its own export labels use a `magspriteed_frameN_*`
+naming convention; loading a `.prg`/`.sym` compiled before this tool's
+rename (still using the legacy `fire_frameN_*` labels) is also supported.
 
 ## Features
 
@@ -42,7 +45,8 @@ works entirely standalone.
   stays self-contained even if the source `.kla` moves).
 - **Import from a compiled build** - Load an existing sprite bank straight
   out of a `.prg` + VICE-format `.sym` pair by locating its
-  `fire_frameN_{tl,tr,bl,br}` symbols.
+  `magspriteed_frameN_{tl,tr,bl,br}` (or legacy `fire_frameN_{tl,tr,bl,br}`)
+  symbols.
 - **Export**
   - ASM source (`MagSpriteEd_Sprites_Data.s`-style), one label per sprite piece.
   - Deduplicated/optimized ASM plus composition tables (positions and

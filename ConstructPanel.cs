@@ -250,8 +250,8 @@ public sealed class ConstructPanel : UserControl
             AutoSize = true,
             Padding = new Padding(8, 4, 0, 0),
             // Also written into the "Export Optimized ASM" output as
-            // var fire_opt_pingpong - Fire.s's Fire_Frame reads that to
-            // pick ping-pong vs. simple forward-wrap playback on the C64
+            // var magspriteed_opt_pingpong - Fire.s's Fire_Frame reads that
+            // to pick ping-pong vs. simple forward-wrap playback on the C64
             // itself (see BuildOptimizedAsmExport), so this one checkbox
             // controls both the editor's own preview loop and the shipped
             // demo's animation.
@@ -941,8 +941,8 @@ public sealed class ConstructPanel : UserControl
     // frames/pieces): only the distinct 12x21 pieces are emitted once each,
     // plus small per-frame tables (pointer index, $d010, X, Y) that
     // Fire_Frame looks up at runtime instead of the fixed constants/simple
-    // arithmetic it uses today, and fire_opt_pingpong (the Timeline's own
-    // Ping-pong checkbox) telling it whether to bounce back and forth or
+    // arithmetic it uses today, and magspriteed_opt_pingpong (the Timeline's
+    // own Ping-pong checkbox) telling it whether to bounce back and forth or
     // just wrap forward. Requires Startup\Fire.s's
     // m_fire_sprites_optimized/m_fire_code_optimized macros, selected via
     // FIRE_COMPOSITION_TABLES at build time - the default build is
@@ -973,7 +973,7 @@ public sealed class ConstructPanel : UserControl
         var dedup = bank.BuildDedupMap(ReferencedPieces());
 
         var sb = new StringBuilder();
-        sb.AppendLine("// Deduplicated fire sprite composition exported from Tool\\SpriteEditor's Construct panel.");
+        sb.AppendLine("// Deduplicated sprite composition exported from MagSpriteEd's Construct panel.");
         sb.AppendLine($"// {dedup.CanonicalCount} distinct 12x21 piece(s) stored (the pool has {bank.PieceCount} raw");
         sb.AppendLine("// slots, but only pieces some (frame, hardware sprite) actually references are exported -");
         sb.AppendLine("// unreferenced pool pieces left over from editing history cost nothing here) - identical");
@@ -982,15 +982,15 @@ public sealed class ConstructPanel : UserControl
         sb.AppendLine("// Included from Startup\\Fire.s's m_fire_sprites_optimized/m_fire_code_optimized macros");
         sb.AppendLine("// when FIRE_COMPOSITION_TABLES is defined at build time - do not hand-edit, re-export instead.");
         sb.AppendLine();
-        sb.AppendLine($"var fire_opt_sprite_count = {dedup.CanonicalCount}");
-        sb.AppendLine($"var fire_opt_frame_count = {_animFrameCount}");
-        sb.AppendLine($"var fire_opt_pingpong = {(_pingPongCheck.Checked ? 1 : 0)}");
+        sb.AppendLine($"var magspriteed_opt_sprite_count = {dedup.CanonicalCount}");
+        sb.AppendLine($"var magspriteed_opt_frame_count = {_animFrameCount}");
+        sb.AppendLine($"var magspriteed_opt_pingpong = {(_pingPongCheck.Checked ? 1 : 0)}");
         sb.AppendLine();
 
         for (int i = 0; i < dedup.CanonicalCount; i++)
         {
             int piece = dedup.CanonicalToSlot[i];
-            bank.EmitSpriteAsmBlock(sb, $"fire_opt_sprite_{i}", piece);
+            bank.EmitSpriteAsmBlock(sb, $"magspriteed_opt_sprite_{i}", piece);
         }
         sb.AppendLine();
 
@@ -999,14 +999,14 @@ public sealed class ConstructPanel : UserControl
         // CPU-read data (unlike the sprite pieces above, which must stay
         // in the $4000 VIC bank), so they're free to live anywhere; moving
         // them out of the $6880-$d000 budget leaves more of it for
-        // Lightning_Tables. At 25 bytes/frame (fire_ptr_table 8 + fire_
-        // d010_table 1 + fire_pos_x_lo 8 + fire_pos_y 8) even 31 frames
-        // (the animframe*8 byte-fit ceiling) is under 800 bytes, well
-        // inside the ~6KB free before $ffff.
-        sb.AppendLine("        org $e900, \"Fire_Composition_Tables\"");
+        // Lightning_Tables. At 25 bytes/frame (magspriteed_ptr_table 8 +
+        // magspriteed_d010_table 1 + magspriteed_pos_x_lo 8 + magspriteed_
+        // pos_y 8) even 31 frames (the animframe*8 byte-fit ceiling) is
+        // under 800 bytes, well inside the ~6KB free before $ffff.
+        sb.AppendLine("        org $e900, \"MagSpriteEd_Composition_Tables\"");
         sb.AppendLine();
 
-        sb.AppendLine("fire_ptr_table:");
+        sb.AppendLine("magspriteed_ptr_table:");
         for (int f = 0; f < _animFrameCount; f++)
         {
             sb.Append("        .byte ");
@@ -1025,7 +1025,7 @@ public sealed class ConstructPanel : UserControl
         }
         sb.AppendLine();
 
-        sb.AppendLine("fire_d010_table:");
+        sb.AppendLine("magspriteed_d010_table:");
         sb.Append("        .byte ");
         for (int f = 0; f < _animFrameCount; f++)
         {
@@ -1038,7 +1038,7 @@ public sealed class ConstructPanel : UserControl
         sb.AppendLine();
         sb.AppendLine();
 
-        sb.AppendLine("fire_pos_x_lo:");
+        sb.AppendLine("magspriteed_pos_x_lo:");
         for (int f = 0; f < _animFrameCount; f++)
         {
             sb.Append("        .byte ");
@@ -1051,7 +1051,7 @@ public sealed class ConstructPanel : UserControl
         }
         sb.AppendLine();
 
-        sb.AppendLine("fire_pos_y:");
+        sb.AppendLine("magspriteed_pos_y:");
         for (int f = 0; f < _animFrameCount; f++)
         {
             sb.Append("        .byte ");
