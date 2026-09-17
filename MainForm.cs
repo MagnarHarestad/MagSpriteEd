@@ -536,19 +536,11 @@ public sealed class MainForm : Form
         _toolbar.Items.Add(new ToolStripSeparator());
 
         // -- Frame count (Timeline length - independent of the sprite pool
-        // above; see ConstructPanel's class remarks). The "Frames" label +
-        // value field sit after all the frame-step buttons (per request),
-        // not next to the Apply icon that reads it - that's still correct
-        // since Apply just reads _frameCountUpDown.Value live at click
-        // time, regardless of where either control is drawn. --
-        AddToolbarButton(Icons.Apply(), "Apply frame count (Timeline length)", (_, _) =>
-        {
-            _constructPanel.SetAnimFrameCount((int)_frameCountUpDown.Value);
-            _currentFrame = Math.Min(_currentFrame, _constructPanel.AnimFrameCount - 1);
-            SelectFrame(_currentFrame);
-            RefreshAll();
-            RefreshStatus($"Frame count set to {_constructPanel.AnimFrameCount}.");
-        });
+        // above; see ConstructPanel's class remarks). The frame-step
+        // buttons come first, then the "Frames" label + value field, then
+        // Apply last (per request) - it still just reads
+        // _frameCountUpDown.Value live at click time, so it works
+        // regardless of where any of these are drawn relative to it. --
         AddToolbarButton(Icons.FrameInsert(), "Add 1 new frame step at the current Timeline position (duplicate of it)", (_, _) => AddFrameStepAtCurrent());
         AddToolbarButton(Icons.FrameDelete(), "Delete the current animation frame step", (_, _) => DeleteCurrentFrameStep());
         AddToolbarButton(Icons.Duplicate(), "Copy this animation frame's sprites data (positions + Sprite #s) to Clipboard", (_, _) => _constructPanel.CopyCurrentFrameToClipboard());
@@ -560,6 +552,14 @@ public sealed class MainForm : Form
         _toolbar.Items.Add(new ToolStripLabel("Frames") { ForeColor = Color.Gainsboro });
         _frameCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 128, Value = 8 };
         _toolbar.Items.Add(new ToolStripControlHost(_frameCountUpDown) { AutoSize = false, Width = 46 });
+        AddToolbarButton(Icons.Apply(), "Apply frame count (Timeline length)", (_, _) =>
+        {
+            _constructPanel.SetAnimFrameCount((int)_frameCountUpDown.Value);
+            _currentFrame = Math.Min(_currentFrame, _constructPanel.AnimFrameCount - 1);
+            SelectFrame(_currentFrame);
+            RefreshAll();
+            RefreshStatus($"Frame count set to {_constructPanel.AnimFrameCount}.");
+        });
     }
 
     /// <summary>Inserts a new animation frame right at the current Timeline
