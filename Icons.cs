@@ -296,4 +296,14 @@ internal static class Icons
         using var b = new SolidBrush(Stroke);
         for (int i = 0; i < 6; i++) g.FillRectangle(b, 2 + i * 3, 3, 1.6f, 14);
     });
+
+    // A dashed bounding box with a corner index number - what Construct
+    // draws around each sprite when outlines are on.
+    public static Bitmap Outline() => Make(g =>
+    {
+        using var pen = new Pen(Stroke, 1.4f) { DashStyle = DashStyle.Dash };
+        g.DrawRectangle(pen, 3, 4, 14, 12);
+        using var b = new SolidBrush(Stroke);
+        g.FillRectangle(b, 4, 5, 3, 4);
+    });
 }

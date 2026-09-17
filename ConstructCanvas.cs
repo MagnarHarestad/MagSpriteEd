@@ -64,6 +64,9 @@ internal sealed class ConstructCanvas : Control
         SetStyle(ControlStyles.ResizeRedraw | ControlStyles.Selectable | ControlStyles.OptimizedDoubleBuffer, true);
     }
 
+    private const int MinZoom = 1;
+    private const int MaxZoom = 4;
+
     public void ApplyZoomedSize() => Size = new Size(BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom);
 
     private Rectangle SpriteRect(int spriteIndex) =>
@@ -225,6 +228,28 @@ internal sealed class ConstructCanvas : Control
     {
         base.OnMouseUp(e);
         _dragging = false;
+    }
+
+    /// <summary>Replaces the old Zoom combo box that lived in the removed
+    /// Backdrop panel - scroll to zoom, same as PositionedEditCanvas
+    /// already does. This control has no pan offset of its own (unlike
+    /// PositionedEditCanvas): it just resizes, and the containing AutoScroll
+    /// panel (ConstructPanel's canvasScroll) handles bringing whatever's now
+    /// off-screen back into view.</summary>
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        // Marks the wheel message as consumed so the containing AutoScroll
+        // panel doesn't ALSO scroll its content on the same wheel tick -
+        // OnMouseWheel is actually handed a HandledMouseEventArgs even
+        // though its own signature only promises the plain base type.
+        if (e is HandledMouseEventArgs handled) handled.Handled = true;
+
+        int newZoom = Math.Clamp(Zoom + (e.Delta > 0 ? 1 : -1), MinZoom, MaxZoom);
+        if (newZoom == Zoom) return;
+        Zoom = newZoom;
+        ApplyZoomedSize();
+        Invalidate();
     }
 
     protected override bool IsInputKey(Keys keyData) =>

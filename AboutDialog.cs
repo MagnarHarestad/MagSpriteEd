@@ -130,11 +130,17 @@ internal sealed class AboutDialog : Form
         "  Arrow keys               Nudge the selected sprite(s) by 1 pixel\r\n" +
         "  Ctrl+click               Add/remove a sprite from the selection group\r\n" +
         "  Ctrl+Z / Ctrl+Y          Undo / redo position and Sprite # changes\r\n" +
+        "  Mouse wheel              Zoom the composited preview in / out\r\n" +
         "  Double-click a list cell Edit Sprite# / X / Y directly in the sprite table\r\n" +
         "\r\n" +
         "TOOLS\r\n" +
         "  Pencil / Fill / Line     Left = paint, right = erase\r\n" +
         "  Mirror                   Mirrors every stroke left/right while enabled\r\n" +
+        "  Show sprite outlines     Toggles the bounding box + index number Construct\r\n" +
+        "                           draws over each sprite in its composited preview\r\n" +
+        "  Copy/Paste frame icons   Copy this animation frame's full sprite composition\r\n" +
+        "                           (positions + Sprite #s, all 8 sprites) to an in-memory\r\n" +
+        "                           clipboard, and paste it into any other frame\r\n" +
         "  Multicolour/Hires        Toggles the CURRENTLY EDITED sprite between 4-colour\r\n" +
         "                           double-width pixels and 1-colour double-resolution\r\n" +
         "                           pixels - a per-sprite setting, like a real C64's $d01c";

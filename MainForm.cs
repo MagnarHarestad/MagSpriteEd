@@ -268,9 +268,10 @@ public sealed class MainForm : Form
 
         // ---- Right: embedded Construct panel (placement/composition over
         // the backdrop) - also the sole frame navigator now; the FRAMES
-        // thumbnail strip was removed in favour of its Timeline. ----
+        // thumbnail strip was removed in favour of its Timeline. Loading a
+        // backdrop is only ever done via this Menu's own item now (see
+        // BuildToolbar) - ConstructPanel no longer has its own button. ----
         _constructPanel = new ConstructPanel(() => _bank, () => _backdrop);
-        _constructPanel.LoadBackdropRequested += (_, _) => LoadBackdropPicture();
         _constructPanel.FrameChanged += frame =>
         {
             _currentFrame = Math.Max(0, Math.Min(frame, _constructPanel.AnimFrameCount - 1));
@@ -470,13 +471,25 @@ public sealed class MainForm : Form
         _positionedModeBtn.CheckedChanged += (_, _) => SetPositionedMode(_positionedModeBtn.Checked);
         _toolbar.Items.Add(_positionedModeBtn);
 
+        // -- Sprite outline visibility in Construct's composited preview -
+        // moved here from the removed "Backdrop" panel's own checkbox. --
+        var outlinesBtn = new ToolStripButton
+        {
+            Image = Icons.Outline(),
+            DisplayStyle = ToolStripItemDisplayStyle.Image,
+            ToolTipText = "Show sprite outlines (bounding box + index) in Construct's preview",
+            CheckOnClick = true,
+            Checked = true
+        };
+        outlinesBtn.CheckedChanged += (_, _) => _constructPanel.ShowSpriteOutlines = outlinesBtn.Checked;
+        _toolbar.Items.Add(outlinesBtn);
+
         _toolbar.Items.Add(new ToolStripSeparator());
 
         // -- Frame operations --
         AddToolbarButton(Icons.Clear(), "Clear this sprite", (_, _) => { EnsureExclusiveEditTarget(); PushUndo(); ClearPiece(); RefreshAll(); });
         AddToolbarButton(Icons.FlipH(), "Flip this sprite horizontal", (_, _) => { EnsureExclusiveEditTarget(); PushUndo(); FlipHorizontalPiece(); RefreshAll(); });
         AddToolbarButton(Icons.FlipV(), "Flip this sprite vertical", (_, _) => { EnsureExclusiveEditTarget(); PushUndo(); FlipVerticalPiece(); RefreshAll(); });
-        AddToolbarButton(Icons.Duplicate(), "Duplicate this animation frame's sprites (position + art) to the next frame", (_, _) => DuplicateAllToNextFrame());
         AddToolbarButton(Icons.Copy(), "Copy this sprite", (_, _) =>
         {
             var grid = _bank.Piece(_editPiece);
@@ -504,8 +517,26 @@ public sealed class MainForm : Form
 
         _toolbar.Items.Add(new ToolStripSeparator());
 
+        // -- Sprite pool size: how many distinct 12x21 art pieces exist,
+        // entirely independent of the Frame count below. (Swapped ahead of
+        // Frames, per request.) --
+        _toolbar.Items.Add(new ToolStripLabel("Pool") { ForeColor = Color.Gainsboro });
+        _poolCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 512, Value = _bank.PieceCount };
+        _toolbar.Items.Add(new ToolStripControlHost(_poolCountUpDown) { AutoSize = false, Width = 50 });
+        AddToolbarButton(Icons.Apply(), "Apply sprite pool size (how many distinct pieces of art exist)", (_, _) =>
+        {
+            if (!TryApplyPoolSize((int)_poolCountUpDown.Value)) { _poolCountUpDown.Value = _bank.PieceCount; return; }
+            _editPiece = Math.Min(_editPiece, _bank.PieceCount - 1);
+            _spritePoolStrip.SetPieceCount(_bank.PieceCount);
+            _constructPanel.RefreshAfterPoolChange();
+            RefreshAll();
+            RefreshStatus($"Sprite pool size set to {_bank.PieceCount}.");
+        });
+
+        _toolbar.Items.Add(new ToolStripSeparator());
+
         // -- Frame count (Timeline length - independent of the sprite pool
-        // below; see ConstructPanel's class remarks) --
+        // above; see ConstructPanel's class remarks) --
         _toolbar.Items.Add(new ToolStripLabel("Frames") { ForeColor = Color.Gainsboro });
         _frameCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 128, Value = 8 };
         _toolbar.Items.Add(new ToolStripControlHost(_frameCountUpDown) { AutoSize = false, Width = 46 });
@@ -519,22 +550,11 @@ public sealed class MainForm : Form
         });
         AddToolbarButton(Icons.FrameInsert(), "Add 1 new frame step at the current Timeline position (duplicate of it)", (_, _) => AddFrameStepAtCurrent());
         AddToolbarButton(Icons.FrameDelete(), "Delete the current animation frame step", (_, _) => DeleteCurrentFrameStep());
-
-        _toolbar.Items.Add(new ToolStripSeparator());
-
-        // -- Sprite pool size: how many distinct 12x21 art pieces exist,
-        // entirely independent of the Frame count above. --
-        _toolbar.Items.Add(new ToolStripLabel("Pool") { ForeColor = Color.Gainsboro });
-        _poolCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 512, Value = _bank.PieceCount };
-        _toolbar.Items.Add(new ToolStripControlHost(_poolCountUpDown) { AutoSize = false, Width = 50 });
-        AddToolbarButton(Icons.Apply(), "Apply sprite pool size (how many distinct pieces of art exist)", (_, _) =>
+        AddToolbarButton(Icons.Duplicate(), "Copy this animation frame's sprites data (positions + Sprite #s) to Clipboard", (_, _) => _constructPanel.CopyCurrentFrameToClipboard());
+        AddToolbarButton(Icons.Paste(), "Paste sprites data from Clipboard into the current animation frame", (_, _) =>
         {
-            if (!TryApplyPoolSize((int)_poolCountUpDown.Value)) { _poolCountUpDown.Value = _bank.PieceCount; return; }
-            _editPiece = Math.Min(_editPiece, _bank.PieceCount - 1);
-            _spritePoolStrip.SetPieceCount(_bank.PieceCount);
-            _constructPanel.RefreshAfterPoolChange();
+            _constructPanel.PasteFrameFromClipboard();
             RefreshAll();
-            RefreshStatus($"Sprite pool size set to {_bank.PieceCount}.");
         });
     }
 
@@ -1006,20 +1026,6 @@ public sealed class MainForm : Form
                 int r2 = SpriteBank.QuadRows - 1 - r;
                 (grid[r, c], grid[r2, c]) = (grid[r2, c], grid[r, c]);
             }
-    }
-
-    /// <summary>Duplicates the current Construct ANIMATION frame's full
-    /// composition - every hardware sprite's position AND which Sprite #
-    /// (pool piece) it shows - into the next animation frame, then follows
-    /// the Timeline there. Operates at the Construct level, not the
-    /// SpriteBank's own pixel data: since Sprite # keyframing lets any
-    /// hardware sprite reference any piece, "next piece" is not what the
-    /// next ANIMATION frame shows in general, so duplicating raw pixel
-    /// content wouldn't reliably reproduce what's on screen one frame
-    /// later.</summary>
-    private void DuplicateAllToNextFrame()
-    {
-        _constructPanel.DuplicateFrameToNext();
     }
 
     // ---------------------------------------------------------------------

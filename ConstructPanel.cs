@@ -42,8 +42,6 @@ public sealed class ConstructPanel : UserControl
     private int _editingRow = -1, _editingCol = -1;
     private Button _playButton = null!;
     private NumericUpDown _fpsUpDown = null!;
-    private ComboBox _zoomCombo = null!;
-    private CheckBox _outlinesCheck = null!;
     private TrackBar _frameScrub = null!;
     private Label _frameLabel = null!;
 
@@ -78,11 +76,28 @@ public sealed class ConstructPanel : UserControl
     private readonly List<(int frame, int[] x, int[] y, int[] source)> _posRedo = new();
     private const int PosUndoCap = 100;
 
+    // One frame's worth of copied position+source data - see
+    // CopyCurrentFrameToClipboard/PasteFrameFromClipboard.
+    private (int[] x, int[] y, int[] source)? _frameClipboard;
+
     // Individual colour alternation exactly as Fire_Frame writes to
     // $d027-$d02e: 8,10,8,10,10,8,10,8 (orange/light-red).
     private static readonly byte[] IndividualPaletteIndex = { 8, 10, 8, 10, 10, 8, 10, 8 };
 
-    public event EventHandler? LoadBackdropRequested;
+    /// <summary>Shows/hides each sprite's bounding-box outline and index
+    /// number in the composited preview - now a toolbar toggle in MainForm
+    /// (moved out of the removed "Backdrop" panel) rather than a checkbox
+    /// living in this control.</summary>
+    public bool ShowSpriteOutlines
+    {
+        get => _canvas.ShowOutlines;
+        set
+        {
+            if (_canvas.ShowOutlines == value) return;
+            _canvas.ShowOutlines = value;
+            _canvas.Invalidate();
+        }
+    }
 
     public ConstructPanel(Func<SpriteBank> bankProvider, Func<BackdropPicture?> backdropProvider)
     {
@@ -126,9 +141,16 @@ public sealed class ConstructPanel : UserControl
     // ---------------------------------------------------------------------
     private void BuildUi()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
+        // One column: the composited canvas fills the top, everything else
+        // (Timeline / Sprites+VIC / Actions) sits in one row along the
+        // bottom instead of a narrow sidebar - see class remarks. That
+        // sidebar's Backdrop panel is gone entirely: "Load Backdrop" now
+        // lives on MainForm's own Menu, sprite-outline visibility is a
+        // MainForm toolbar toggle (ShowSpriteOutlines), and Zoom is
+        // ConstructCanvas's own scroll-wheel zoom.
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _canvas = new ConstructCanvas
         {
@@ -175,11 +197,17 @@ public sealed class ConstructPanel : UserControl
         _canvas.Location = new Point(12, 12);
         canvasScroll.Controls.Add(_canvas);
 
-        var side = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(8), BackColor = Color.FromArgb(22, 22, 22) };
-        var flow = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Width = 278 };
+        var bottomRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true,
+            WrapContents = true,
+            Padding = new Padding(8),
+            BackColor = Color.FromArgb(22, 22, 22)
+        };
 
-        flow.Controls.Add(MakeGroup("Backdrop", BuildBackdropRow()));
-        flow.Controls.Add(MakeGroup("Timeline", BuildTimelineRow()));
+        bottomRow.Controls.Add(MakeGroup("Timeline", BuildTimelineRow()));
 
         _list = new DoubleBufferedListView { View = View.Details, FullRowSelect = true, MultiSelect = true, GridLines = true, HideSelection = false, Width = 258, Height = 190, BackColor = Color.FromArgb(30, 30, 30), ForeColor = Color.Gainsboro };
         _list.Columns.Add("#", 24);
@@ -207,43 +235,17 @@ public sealed class ConstructPanel : UserControl
         _cellEditor.KeyDown += CellEditor_KeyDown;
         _cellEditor.Leave += (_, _) => CommitCellEdit();
         _list.Controls.Add(_cellEditor);
-        flow.Controls.Add(MakeGroup("Sprites (0-7) - Ctrl/Shift-click to group, dbl-click to edit", _list));
 
+        // VIC register readout folded into this same group (no more
+        // separate "VIC registers" box) - just stacked below the list.
         _d010Label = new Label { Text = "$d010 = %00000000 ($00)", AutoSize = true, ForeColor = Color.Gainsboro };
-        flow.Controls.Add(MakeGroup("VIC registers (this frame)", _d010Label));
+        bottomRow.Controls.Add(MakeGroup("Sprites (0-7) - Ctrl/Shift-click to group, dbl-click to edit", Stack(_list, _d010Label)));
 
-        flow.Controls.Add(MakeGroup("Actions", BuildActionsRow()));
-
-        side.Controls.Add(flow);
+        bottomRow.Controls.Add(MakeGroup("Actions", BuildActionsRow()));
 
         root.Controls.Add(canvasScroll, 0, 0);
-        root.Controls.Add(side, 1, 0);
+        root.Controls.Add(bottomRow, 0, 1);
         Controls.Add(root);
-    }
-
-    private Control BuildBackdropRow()
-    {
-        var loadBtn = new Button { Text = "Load Backdrop (.kla)...", AutoSize = true, Margin = new Padding(2) };
-        loadBtn.Click += (_, _) => LoadBackdropRequested?.Invoke(this, EventArgs.Empty);
-
-        var zoomRow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false };
-        zoomRow.Controls.Add(new Label { Text = "Zoom", AutoSize = true, Padding = new Padding(0, 6, 4, 0) });
-        _zoomCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 70 };
-        _zoomCombo.Items.AddRange(new object[] { "1x", "2x", "3x" });
-        _zoomCombo.SelectedIndex = 1;
-        _zoomCombo.SelectedIndexChanged += (_, _) =>
-        {
-            _canvas.Zoom = _zoomCombo.SelectedIndex + 1;
-            _canvas.ApplyZoomedSize();
-            _canvas.Invalidate();
-        };
-        zoomRow.Controls.Add(_zoomCombo);
-        zoomRow.Size = zoomRow.PreferredSize;
-
-        _outlinesCheck = new CheckBox { Text = "Show sprite outlines", ForeColor = Color.Gainsboro, AutoSize = true, Checked = true };
-        _outlinesCheck.CheckedChanged += (_, _) => { _canvas.ShowOutlines = _outlinesCheck.Checked; _canvas.Invalidate(); };
-
-        return Stack(loadBtn, zoomRow, _outlinesCheck);
     }
 
     private Control BuildTimelineRow()
@@ -555,22 +557,28 @@ public sealed class ConstructPanel : UserControl
         MessageBox.Show(this, $"Copied frame {_frame + 1}'s positions to frame {next + 1}.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    /// <summary>Copies the current animation frame's FULL per-sprite state -
-    /// position AND Sprite # source, for all 8 hardware sprites - into the
-    /// next animation frame (wrapping at the end), then moves the Timeline
-    /// there. Broader than CopyPositionsToNextFrame above, which only
-    /// touches X/Y: this is what the toolbar's "Duplicate" button uses, so
-    /// clicking it actually reproduces what's on screen right now, one
-    /// frame later, instead of just its positions.</summary>
-    public void DuplicateFrameToNext()
+    /// <summary>Snapshots the current animation frame's FULL per-sprite
+    /// state - position AND Sprite # source, for all 8 hardware sprites -
+    /// into an in-memory clipboard, for PasteFrameFromClipboard to drop
+    /// into any (possibly different) frame later. Separate from MainForm's
+    /// own pixel-art clipboard (_clipboard there), which only ever holds
+    /// one piece's 12x21 art.</summary>
+    public void CopyCurrentFrameToClipboard()
     {
         EnsureArraysAllocated();
-        if (_animFrameCount < 2) return;
-        int next = (_frame + 1) % _animFrameCount;
-        Array.Copy(_posX[_frame], _posX[next], 8);
-        Array.Copy(_posY[_frame], _posY[next], 8);
-        Array.Copy(_spriteSource[_frame], _spriteSource[next], 8);
-        GoToFrame(next);
+        _frameClipboard = ((int[])_posX[_frame].Clone(), (int[])_posY[_frame].Clone(), (int[])_spriteSource[_frame].Clone());
+    }
+
+    public void PasteFrameFromClipboard()
+    {
+        if (_frameClipboard == null) return;
+        EnsureArraysAllocated();
+        PushPositionUndo();
+        var (x, y, source) = _frameClipboard.Value;
+        Array.Copy(x, _posX[_frame], 8);
+        Array.Copy(y, _posY[_frame], 8);
+        Array.Copy(source, _spriteSource[_frame], 8);
+        LoadFrameIntoCanvas();
     }
 
     private void CopyPositionsToAllFrames()
