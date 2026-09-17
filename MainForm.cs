@@ -506,9 +506,6 @@ public sealed class MainForm : Form
             Array.Copy(_clipboard, grid, _clipboard.Length);
             RefreshAll();
         });
-        AddToolbarButton(Icons.Wand(), "Reset THIS sprite piece to procedural", (_, _) => { PushUndo(); _bank.GenerateProceduralPiece(_editPiece); RefreshAll(); });
-        AddToolbarButton(Icons.Wand(), "Reset ALL sprite pieces to procedural", (_, _) => { PushUndoAll(); _bank.GenerateProceduralAll(); RefreshAll(); });
-
         _toolbar.Items.Add(new ToolStripSeparator());
 
         // -- Undo / redo (pixel art) --
@@ -560,6 +557,8 @@ public sealed class MainForm : Form
             RefreshAll();
             RefreshStatus($"Frame count set to {_constructPanel.AnimFrameCount}.");
         });
+        AddToolbarButton(Icons.Wand(), "Reset THIS sprite piece to procedural", (_, _) => { PushUndo(); _bank.GenerateProceduralPiece(_editPiece); RefreshAll(); });
+        AddToolbarButton(Icons.Wand(), "Reset ALL sprite pieces to procedural", (_, _) => { PushUndoAll(); _bank.GenerateProceduralAll(); RefreshAll(); });
     }
 
     /// <summary>Inserts a new animation frame right at the current Timeline
