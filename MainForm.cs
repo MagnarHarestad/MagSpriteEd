@@ -536,10 +536,11 @@ public sealed class MainForm : Form
         _toolbar.Items.Add(new ToolStripSeparator());
 
         // -- Frame count (Timeline length - independent of the sprite pool
-        // above; see ConstructPanel's class remarks) --
-        _toolbar.Items.Add(new ToolStripLabel("Frames") { ForeColor = Color.Gainsboro });
-        _frameCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 128, Value = 8 };
-        _toolbar.Items.Add(new ToolStripControlHost(_frameCountUpDown) { AutoSize = false, Width = 46 });
+        // above; see ConstructPanel's class remarks). The "Frames" label +
+        // value field sit after all the frame-step buttons (per request),
+        // not next to the Apply icon that reads it - that's still correct
+        // since Apply just reads _frameCountUpDown.Value live at click
+        // time, regardless of where either control is drawn. --
         AddToolbarButton(Icons.Apply(), "Apply frame count (Timeline length)", (_, _) =>
         {
             _constructPanel.SetAnimFrameCount((int)_frameCountUpDown.Value);
@@ -556,6 +557,9 @@ public sealed class MainForm : Form
             _constructPanel.PasteFrameFromClipboard();
             RefreshAll();
         });
+        _toolbar.Items.Add(new ToolStripLabel("Frames") { ForeColor = Color.Gainsboro });
+        _frameCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 128, Value = 8 };
+        _toolbar.Items.Add(new ToolStripControlHost(_frameCountUpDown) { AutoSize = false, Width = 46 });
     }
 
     /// <summary>Inserts a new animation frame right at the current Timeline
