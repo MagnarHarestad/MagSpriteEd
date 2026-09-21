@@ -23,13 +23,16 @@ internal static class EditorPalette
 
     public static event Action? Changed;
 
-    public static Color ColorFor(byte pixelValue) => pixelValue switch
+    /// <summary>Individual (value 2) is per-piece: pass that piece's own C64 colour index.</summary>
+    public static Color ColorFor(byte pixelValue, int individualIndex) => pixelValue switch
     {
         1 => BackdropPicture.Palette[Mc1Index],
-        2 => BackdropPicture.Palette[IndividualIndex],
+        2 => BackdropPicture.Palette[individualIndex],
         3 => BackdropPicture.Palette[Mc2Index],
         _ => Color.Transparent
     };
+
+    public static void RaiseChanged() => Changed?.Invoke();
 
     /// <summary>slot: 1=MC1, 2=Individual, 3=MC2 (0=Transparent isn't a real colour register).</summary>
     public static void Set(byte slot, int c64ColorIndex)

@@ -24,12 +24,15 @@ internal sealed class ConstructCanvas : Control
     private const int SpriteScreenW = 24;
     private const int SpriteScreenH = 21;
 
-    public int Zoom { get; set; } = 2;
+    public float Zoom { get; set; } = 2f;
     public Bitmap? Backdrop { get; set; }
     /// <summary>When false, hides the per-sprite bounding-box border and
     /// index number entirely - a clean look at just the composited art,
     /// e.g. to check how it actually reads over the backdrop.</summary>
     public bool ShowOutlines { get; set; } = true;
+
+    /// <summary>Checkerboard grid shown behind the sprites when no backdrop picture is loaded.</summary>
+    public bool ShowGrid { get; set; } = true;
 
     /// <summary>(spriteIndex, row 0..20, col 0..11) -> raw 2-bit cell value 0..3.</summary>
     public Func<int, int, int, byte>? SpritePixel { get; set; }
@@ -64,13 +67,14 @@ internal sealed class ConstructCanvas : Control
         SetStyle(ControlStyles.ResizeRedraw | ControlStyles.Selectable | ControlStyles.OptimizedDoubleBuffer, true);
     }
 
-    private const int MinZoom = 1;
-    private const int MaxZoom = 4;
+    private const float MinZoom = 1f;
+    private const float MaxZoom = 8f;
+    private const float ZoomStep = 0.5f;
 
-    public void ApplyZoomedSize() => Size = new Size(BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom);
+    public void ApplyZoomedSize() => Size = new Size((int)Math.Ceiling(BackdropPicture.Width * Zoom), (int)Math.Ceiling(BackdropPicture.Height * Zoom));
 
     private Rectangle SpriteRect(int spriteIndex) =>
-        new((SpriteX[spriteIndex] - 24) * Zoom, (SpriteY[spriteIndex] - 50) * Zoom, SpriteScreenW * Zoom, SpriteScreenH * Zoom);
+        new((int)((SpriteX[spriteIndex] - 24) * Zoom), (int)((SpriteY[spriteIndex] - 50) * Zoom), (int)(SpriteScreenW * Zoom), (int)(SpriteScreenH * Zoom));
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -80,16 +84,20 @@ internal sealed class ConstructCanvas : Control
         g.SmoothingMode = SmoothingMode.None;
 
         if (Backdrop != null)
-            g.DrawImage(Backdrop, new Rectangle(0, 0, BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom));
+            g.DrawImage(Backdrop, new RectangleF(0, 0, BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom));
         else
         {
             using var b = new SolidBrush(Color.FromArgb(24, 24, 24));
             g.FillRectangle(b, ClientRectangle);
-            using var checker = new SolidBrush(Color.FromArgb(34, 34, 34));
-            for (int y = 0; y < Height; y += 16 * Zoom)
-                for (int x = 0; x < Width; x += 16 * Zoom)
-                    if (((x / (16 * Zoom)) + (y / (16 * Zoom))) % 2 == 0)
-                        g.FillRectangle(checker, x, y, 16 * Zoom, 16 * Zoom);
+            if (ShowGrid)
+            {
+                using var checker = new SolidBrush(Color.FromArgb(34, 34, 34));
+                float cell = 16 * Zoom;
+                for (int cy = 0; cy * cell < Height; cy++)
+                    for (int cx = 0; cx * cell < Width; cx++)
+                        if ((cx + cy) % 2 == 0)
+                            g.FillRectangle(checker, cx * cell, cy * cell, cell, cell);
+            }
         }
 
         for (int s = 0; s < 8; s++) DrawSprite(g, s);
@@ -118,19 +126,19 @@ internal sealed class ConstructCanvas : Control
                         // no shared MC1/MC2).
                         if ((v & 2) != 0)
                         {
-                            using var b1 = new SolidBrush(PaletteProvider(2, spriteIndex));
+                            var b1 = BrushCache.Get(PaletteProvider(2, spriteIndex));
                             g.FillRectangle(b1, (screenX + c * 2) * Zoom, (screenY + r) * Zoom, Zoom, Zoom);
                         }
                         if ((v & 1) != 0)
                         {
-                            using var b2 = new SolidBrush(PaletteProvider(2, spriteIndex));
+                            var b2 = BrushCache.Get(PaletteProvider(2, spriteIndex));
                             g.FillRectangle(b2, (screenX + c * 2 + 1) * Zoom, (screenY + r) * Zoom, Zoom, Zoom);
                         }
                     }
                     else
                     {
                         if (v == 0) continue;
-                        using var brush = new SolidBrush(PaletteProvider(v, spriteIndex));
+                        var brush = BrushCache.Get(PaletteProvider(v, spriteIndex));
                         g.FillRectangle(brush, (screenX + c * 2) * Zoom, (screenY + r) * Zoom, 2 * Zoom, Zoom);
                     }
                 }
@@ -212,8 +220,8 @@ internal sealed class ConstructCanvas : Control
     {
         base.OnMouseMove(e);
         if (!_dragging || SelectedSprites.Count == 0) return;
-        int dx = (e.X - _dragStartMouseX) / Zoom;
-        int dy = (e.Y - _dragStartMouseY) / Zoom;
+        int dx = (int)((e.X - _dragStartMouseX) / Zoom);
+        int dy = (int)((e.Y - _dragStartMouseY) / Zoom);
         foreach (var s in SelectedSprites)
         {
             var (sx, sy) = _dragStart[s];
@@ -245,10 +253,21 @@ internal sealed class ConstructCanvas : Control
         // though its own signature only promises the plain base type.
         if (e is HandledMouseEventArgs handled) handled.Handled = true;
 
-        int newZoom = Math.Clamp(Zoom + (e.Delta > 0 ? 1 : -1), MinZoom, MaxZoom);
-        if (newZoom == Zoom) return;
+        float old = Zoom;
+        float newZoom = Math.Clamp(Zoom + (e.Delta > 0 ? ZoomStep : -ZoomStep), MinZoom, MaxZoom);
+        if (newZoom == old) return;
         Zoom = newZoom;
         ApplyZoomedSize();
+
+        // Keep the point under the cursor stable: shift the parent's scroll
+        // position by how far that point moved.
+        if (Parent is ScrollableControl scroll)
+        {
+            float ratio = newZoom / old;
+            int shiftX = (int)Math.Round(e.X * (ratio - 1f));
+            int shiftY = (int)Math.Round(e.Y * (ratio - 1f));
+            scroll.AutoScrollPosition = new Point(-scroll.AutoScrollPosition.X + shiftX, -scroll.AutoScrollPosition.Y + shiftY);
+        }
         Invalidate();
     }
 

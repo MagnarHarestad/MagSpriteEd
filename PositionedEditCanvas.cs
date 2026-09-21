@@ -97,19 +97,19 @@ internal sealed class PositionedEditCanvas : Control
                         // one colour a real hires sprite actually has.
                         if ((v & 2) != 0)
                         {
-                            using var b1 = new SolidBrush(PaletteProvider(2, s));
+                            var b1 = BrushCache.Get(PaletteProvider(2, s));
                             g.FillRectangle(b1, screenX + c * 2 * Zoom, screenY + r * Zoom, Zoom, Zoom);
                         }
                         if ((v & 1) != 0)
                         {
-                            using var b2 = new SolidBrush(PaletteProvider(2, s));
+                            var b2 = BrushCache.Get(PaletteProvider(2, s));
                             g.FillRectangle(b2, screenX + (c * 2 + 1) * Zoom, screenY + r * Zoom, Zoom, Zoom);
                         }
                     }
                     else
                     {
                         if (v == 0) continue;
-                        using var brush = new SolidBrush(PaletteProvider(v, s));
+                        var brush = BrushCache.Get(PaletteProvider(v, s));
                         g.FillRectangle(brush, screenX + c * 2 * Zoom, screenY + r * Zoom, 2 * Zoom, Zoom);
                     }
                 }

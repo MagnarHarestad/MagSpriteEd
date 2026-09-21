@@ -102,7 +102,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "MagSpriteEd - PlasmaBollLightningBolts3D";
+        Text = "MagSpriteEd v1.0";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1300, 760);
         Size = new Size(1680, 900);
@@ -176,7 +176,7 @@ public sealed class MainForm : Form
             PixelProvider = (r, c) => _bank.IsHires(_editPiece)
                 ? (_bank.GetHiresPixel(_editPiece, r, c) != 0 ? (byte)2 : (byte)0)
                 : _bank.Get(_editPiece, r, c),
-            PaletteProvider = PaletteColor
+            PaletteProvider = v => EditorPalette.ColorFor(v, _bank.IndividualColor(_editPiece))
         };
         _canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(12, 12, 12), Padding = new Padding(20) };
         _canvasScroll.Controls.Add(_canvas);
@@ -197,12 +197,11 @@ public sealed class MainForm : Form
                 int source = _constructPanel.GetSpriteSource(_currentFrame, s);
                 return source >= 0 && source < _bank.PieceCount ? _bank.Get(source, row, col) : (byte)0;
             },
-            PaletteProvider = (v, s) => v switch
+            PaletteProvider = (v, s) =>
             {
-                1 => Color.FromArgb(129, 51, 43),
-                2 => IndividualPaletteIndex[s] == 8 ? Color.FromArgb(133, 76, 27) : Color.FromArgb(175, 101, 94),
-                3 => Color.FromArgb(214, 225, 132),
-                _ => Color.Transparent
+                int source = _constructPanel.GetSpriteSource(_currentFrame, s);
+                int ind = source >= 0 && source < _bank.PieceCount ? _bank.IndividualColor(source) : SpriteBank.DefaultIndividualColor;
+                return EditorPalette.ColorFor(v, ind);
             },
             IsSpriteHires = s =>
             {
@@ -222,7 +221,7 @@ public sealed class MainForm : Form
         _spritePoolStrip = new SpritePoolStrip
         {
             PixelProvider = (piece, r, c) => _bank.Get(piece, r, c),
-            PaletteProvider = PaletteColor,
+            PaletteProvider = (piece, v) => EditorPalette.ColorFor(v, _bank.IndividualColor(piece)),
             IsHiresProvider = piece => _bank.IsHires(piece)
         };
         _spritePoolStrip.PieceClicked += piece =>
@@ -372,6 +371,7 @@ public sealed class MainForm : Form
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("New Procedural Bank", Icons.Wand(), (_, _) => NewProceduralBank()));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Sprite Bank (.prg + .sym)...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadSpriteBankFromCompiled)));
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Sprite Bank (.png)...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadSpriteBankFromPng)));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Project (.json)...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadProject)));
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Save Project (.json)...", Icons.Save(), (_, _) => DeferDialogAction(SaveProject)));
@@ -382,6 +382,9 @@ public sealed class MainForm : Form
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export Optimized ASM (deduplicated)...", Icons.Export(), (_, _) => DeferDialogAction(_constructPanel.ExportOptimizedAsm)));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Backdrop Picture (.kla)...", Icons.Picture(), (_, _) => DeferDialogAction(LoadBackdropPicture)));
+        var gridItem = new ToolStripMenuItem("Show Grid in Construct") { CheckOnClick = true, Checked = true };
+        gridItem.CheckedChanged += (_, _) => _constructPanel.ShowGrid = gridItem.Checked;
+        menuBtn.DropDownItems.Add(gridItem);
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Exit", null, (_, _) => Close()));
         // Dropdown items don't inherit colours from the owning button/ToolStrip -
@@ -418,7 +421,14 @@ public sealed class MainForm : Form
         }
         byte[] visualOrder = { 0, 1, 3, 2 }; // Transparent, MC1, MC2, Individual
         foreach (var v in visualOrder) _toolbar.Items.Add(_swatchButtons[v]);
-        EditorPalette.Changed += () => { UpdateSwatchIcons(); _canvas.Invalidate(); };
+        EditorPalette.Changed += () =>
+        {
+            UpdateSwatchIcons();
+            _canvas.Invalidate();
+            _positionedCanvas.Invalidate();
+            _spritePoolStrip.Invalidate();
+            _constructPanel.RefreshSpriteArt();
+        };
         UpdateSwatchIcons();
 
         // -- Multicolour/hires toggle for the piece Single Sprite View is
@@ -471,18 +481,6 @@ public sealed class MainForm : Form
         _positionedModeBtn.CheckedChanged += (_, _) => SetPositionedMode(_positionedModeBtn.Checked);
         _toolbar.Items.Add(_positionedModeBtn);
 
-        // -- Sprite outline visibility in Construct's composited preview -
-        // moved here from the removed "Backdrop" panel's own checkbox. --
-        var outlinesBtn = new ToolStripButton
-        {
-            Image = Icons.Outline(),
-            DisplayStyle = ToolStripItemDisplayStyle.Image,
-            ToolTipText = "Show sprite outlines (bounding box + index) in Construct's preview",
-            CheckOnClick = true,
-            Checked = true
-        };
-        outlinesBtn.CheckedChanged += (_, _) => _constructPanel.ShowSpriteOutlines = outlinesBtn.Checked;
-        _toolbar.Items.Add(outlinesBtn);
 
         _toolbar.Items.Add(new ToolStripSeparator());
 
@@ -557,8 +555,21 @@ public sealed class MainForm : Form
             RefreshAll();
             RefreshStatus($"Frame count set to {_constructPanel.AnimFrameCount}.");
         });
-        AddToolbarButton(Icons.Wand(), "Reset THIS sprite piece to procedural", (_, _) => { PushUndo(); _bank.GenerateProceduralPiece(_editPiece); RefreshAll(); });
-        AddToolbarButton(Icons.Wand(), "Reset ALL sprite pieces to procedural", (_, _) => { PushUndoAll(); _bank.GenerateProceduralAll(); RefreshAll(); });
+
+        _toolbar.Items.Add(new ToolStripSeparator());
+
+        // -- Sprite outline visibility in Construct's composited preview -
+        // moved here from the removed "Backdrop" panel's own checkbox. --
+        var outlinesBtn = new ToolStripButton
+        {
+            Image = Icons.Outline(),
+            DisplayStyle = ToolStripItemDisplayStyle.Image,
+            ToolTipText = "Show sprite outlines (bounding box + index) in Construct's preview",
+            CheckOnClick = true,
+            Checked = true
+        };
+        outlinesBtn.CheckedChanged += (_, _) => _constructPanel.ShowSpriteOutlines = outlinesBtn.Checked;
+        _toolbar.Items.Add(outlinesBtn);
     }
 
     /// <summary>Inserts a new animation frame right at the current Timeline
@@ -636,7 +647,16 @@ public sealed class MainForm : Form
         var popup = new Palette16Popup();
         var screenPos = _toolbar.PointToScreen(anchor.Bounds.Location);
         popup.Location = new Point(screenPos.X, screenPos.Y + anchor.Bounds.Height + 2);
-        popup.ColorPicked += c64Index => EditorPalette.Set(slot, c64Index);
+        popup.ColorPicked += c64Index =>
+        {
+            if (slot == 2)
+            {
+                // Individual is per sprite: only the piece being edited changes.
+                _bank.SetIndividualColor(_editPiece, c64Index);
+                EditorPalette.RaiseChanged();
+            }
+            else EditorPalette.Set(slot, c64Index);
+        };
         popup.Show(this);
     }
 
@@ -809,6 +829,7 @@ public sealed class MainForm : Form
         if (e.Button != MouseButtons.Left && e.Button != MouseButtons.Right) return;
         EnsureExclusiveEditTarget();
         PushUndo();
+        RefreshAll(); // once per stroke: picks up any copy-on-write fork
         int col = e.X / _canvas.CellWidth;
         int row = e.Y / _canvas.CellHeight;
         _lineStartRow = row;
@@ -858,7 +879,7 @@ public sealed class MainForm : Form
                         int maxCol = hires ? SpriteBank.HiresCols : SpriteBank.QuadCols;
                         SetPixel(_editPiece, hires, row, maxCol - 1 - col, color);
                     }
-                    RefreshAll();
+                    RefreshAfterPixelEdit(_editPiece);
                     break;
                 }
             case Tool.Fill:
@@ -916,7 +937,8 @@ public sealed class MainForm : Form
                 FloodFill(source, hires, row, col, color);
                 break;
         }
-        RefreshAll();
+        if (_tool == Tool.Fill) RefreshAll();
+        else RefreshAfterPixelEdit(source);
     }
 
     /// <summary>Flood fill within one piece - piece/localRow/localCol pick
@@ -1252,6 +1274,7 @@ public sealed class MainForm : Form
 
     private void RefreshAll()
     {
+        UpdateSwatchIcons();
         SyncHiresButton();
         FitCanvasToScrollArea();
         _canvas.Invalidate();
@@ -1267,6 +1290,17 @@ public sealed class MainForm : Form
         // "redraw whatever's currently on screen, with the current selection".
         _spritePoolStrip.SetSelected(_editPiece);
         _spritePoolStrip.Invalidate();
+    }
+
+    /// <summary>Cheap refresh for a plain pixel edit inside one piece: skips
+    /// the re-fit/toolbar-sync work RefreshAll does and only repaints the
+    /// pool thumbnail of the piece that changed.</summary>
+    private void RefreshAfterPixelEdit(int piece)
+    {
+        _canvas.Invalidate();
+        _positionedCanvas.Invalidate();
+        _constructPanel.RefreshSpriteArt();
+        _spritePoolStrip.InvalidatePiece(piece);
     }
 
     private void RefreshStatus(string? message)
@@ -1292,7 +1326,7 @@ public sealed class MainForm : Form
     // toolbar swatches (see ShowPalettePopup) is reflected everywhere this
     // is used - the flat canvas, its thumbnails-in-waiting, and the
     // swatches' own icons.
-    private static Color PaletteColor(byte v) => EditorPalette.ColorFor(v);
+    private Color PaletteColor(byte v) => EditorPalette.ColorFor(v, _bank.IndividualColor(_editPiece));
 
     // ---------------------------------------------------------------------
     // File operations
@@ -1377,22 +1411,52 @@ public sealed class MainForm : Form
             _bank = SpriteBank.LoadFromCompiled(prgPath, symPath, out string log);
             _lastPrgPath = prgPath;
             _lastSymPath = symPath;
-            _lastProjectPath = null;
-            _undo.Clear(); _redo.Clear();
-            _editPiece = 0;
-            _editPieceOwnerSprite = -1;
-            _poolCountUpDown.Value = _bank.PieceCount;
-            _spritePoolStrip.SetPieceCount(_bank.PieceCount);
-            int legacyFrames = Math.Max(1, _bank.PieceCount / 4);
-            _constructPanel.ResetForNewBank(legacyFrames);
-            SelectFrame(0);
-            RefreshAll();
-            RefreshStatus(log);
+            AfterBankLoaded(log);
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Load failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private void LoadSpriteBankFromPng()
+    {
+        using var ofd = new OpenFileDialog
+        {
+            Title = "Load sprite bank - select a PNG sprite sheet",
+            Filter = "PNG images (*.png)|*.png|All files (*.*)|*.*"
+        };
+        if (ofd.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            _bank = SpriteBank.LoadFromPng(ofd.FileName, out int[] slotColors, out string log);
+            _lastPrgPath = null;
+            _lastSymPath = null;
+            EditorPalette.Set(1, slotColors[1]);
+            EditorPalette.Set(3, slotColors[3]);
+            for (int p = 0; p < _bank.PieceCount; p++) _bank.SetIndividualColor(p, slotColors[2]);
+            AfterBankLoaded(log);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Load failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void AfterBankLoaded(string log)
+    {
+        _lastProjectPath = null;
+        _undo.Clear(); _redo.Clear();
+        _editPiece = 0;
+        _editPieceOwnerSprite = -1;
+        _poolCountUpDown.Value = _bank.PieceCount;
+        _spritePoolStrip.SetPieceCount(_bank.PieceCount);
+        int legacyFrames = Math.Max(1, _bank.PieceCount / 4);
+        _constructPanel.ResetForNewBank(legacyFrames);
+        SelectFrame(0);
+        RefreshAll();
+        RefreshStatus(log);
     }
 
     private void LoadProject()

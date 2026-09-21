@@ -80,7 +80,7 @@ internal sealed class PixelGridControl : Control
             {
                 byte v = PixelProvider?.Invoke(r, c) ?? 0;
                 Color col = v == 0 ? CheckerColor(r, c) : (PaletteProvider?.Invoke(v) ?? Color.Magenta);
-                using var b = new SolidBrush(col);
+                var b = BrushCache.Get(col);
                 g.FillRectangle(b, c * CellWidth, r * CellHeight, CellWidth, CellHeight);
             }
         }

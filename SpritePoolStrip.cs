@@ -48,7 +48,7 @@ internal sealed class SpritePoolStrip : Control
 
     /// <summary>piece, row, col (0..11) -> raw 2-bit cell value (0..3).</summary>
     public Func<int, int, int, byte>? PixelProvider { get; set; }
-    public Func<byte, Color>? PaletteProvider { get; set; }
+    public Func<int, byte, Color>? PaletteProvider { get; set; }
     /// <summary>piece -> whether it's currently a hires (not multicolour)
     /// piece - see SpriteBank.IsHires. Each piece can independently be
     /// either, so this is checked per piece drawn, not once for the whole
@@ -72,6 +72,13 @@ internal sealed class SpritePoolStrip : Control
         PieceCount = count;
         Height = Math.Max(1, Pad + count * RowStride);
         Invalidate();
+    }
+
+    /// <summary>Repaints just one piece's row instead of the whole strip.</summary>
+    public void InvalidatePiece(int piece)
+    {
+        if (piece < 0 || piece >= PieceCount) return;
+        Invalidate(new Rectangle(0, PieceTop(piece), Width, RowStride));
     }
 
     public void SetSelected(int piece)
@@ -125,7 +132,7 @@ internal sealed class SpritePoolStrip : Control
                 // square cells. Each raw cell's high bit is the left hires
                 // pixel, low bit the right one (see SpriteBank.GetHiresPixel).
                 int hiresCellSize = ThumbWidth / SpriteBank.HiresCols;
-                using var onBrush = new SolidBrush(PaletteProvider?.Invoke(2) ?? Color.Magenta);
+                var onBrush = BrushCache.Get(PaletteProvider?.Invoke(p, 2) ?? Color.Magenta);
                 for (int r = 0; r < Rows; r++)
                 {
                     for (int c = 0; c < Cols; c++)
@@ -144,7 +151,7 @@ internal sealed class SpritePoolStrip : Control
                     {
                         byte v = PixelProvider?.Invoke(p, r, c) ?? 0;
                         if (v == 0) continue;
-                        using var b = new SolidBrush(PaletteProvider?.Invoke(v) ?? Color.Magenta);
+                        var b = BrushCache.Get(PaletteProvider?.Invoke(p, v) ?? Color.Magenta);
                         g.FillRectangle(b, Pad + c * ThumbCellWidth, thumbTop + r * ThumbCellHeight, ThumbCellWidth, ThumbCellHeight);
                     }
                 }

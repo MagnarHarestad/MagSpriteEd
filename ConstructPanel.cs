@@ -99,6 +99,18 @@ public sealed class ConstructPanel : UserControl
         }
     }
 
+    /// <summary>Shows/hides the checkerboard grid behind the sprites (only visible without a backdrop).</summary>
+    public bool ShowGrid
+    {
+        get => _canvas.ShowGrid;
+        set
+        {
+            if (_canvas.ShowGrid == value) return;
+            _canvas.ShowGrid = value;
+            _canvas.Invalidate();
+        }
+    }
+
     public ConstructPanel(Func<SpriteBank> bankProvider, Func<BackdropPicture?> backdropProvider)
     {
         _bankProvider = bankProvider;
@@ -161,12 +173,12 @@ public sealed class ConstructPanel : UserControl
                 if (source < 0 || source >= bank.PieceCount) return 0;
                 return bank.Get(source, row, col);
             },
-            PaletteProvider = (v, spriteIdx) => v switch
+            PaletteProvider = (v, spriteIdx) =>
             {
-                1 => Color.FromArgb(129, 51, 43),
-                2 => IndividualPaletteIndex[spriteIdx] == 8 ? Color.FromArgb(133, 76, 27) : Color.FromArgb(175, 101, 94),
-                3 => Color.FromArgb(214, 225, 132),
-                _ => Color.Transparent
+                var bank = _bankProvider();
+                int source = _spriteSource[_frame][spriteIdx];
+                int ind = source >= 0 && source < bank.PieceCount ? bank.IndividualColor(source) : SpriteBank.DefaultIndividualColor;
+                return EditorPalette.ColorFor(v, ind);
             },
             IsSpriteHires = spriteIdx =>
             {

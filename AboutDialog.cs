@@ -23,7 +23,7 @@ internal sealed class AboutDialog : Form
         BackColor = Color.FromArgb(18, 18, 18);
         ForeColor = Color.Gainsboro;
         Font = new Font("Segoe UI", 9f);
-        ClientSize = new Size(480, 520);
+        ClientSize = new Size(700, 720);
 
         var layout = new TableLayoutPanel
         {
@@ -46,13 +46,20 @@ internal sealed class AboutDialog : Form
         var subtitleLabel = new Label
         {
             AutoSize = true,
-            MaximumSize = new Size(440, 0),
             Margin = new Padding(0, 4, 0, 0),
             Text =
-                "A tool for hand-authoring animated Commodore 64 multicolour\r\n" +
-                "hardware-sprite art: draw a pool of 12x21 sprites, arrange up to\r\n" +
-                "8 hardware sprites per animation frame over a real C64 backdrop\r\n" +
-                "picture, and export as 6502 assembly or a raw binary blob."
+                "Hand-author animated Commodore 64 multicolour hardware-sprite art:\r\n" +
+                "draw a pool of 12x21 sprites, arrange up to 8 hardware sprites per\r\n" +
+                "animation frame over a real C64 backdrop, and export 6502 assembly or binary.\r\n" +
+                "\r\n" +
+                "HOW TO USE\r\n" +
+                "  1. Start a bank: New Blank / New Procedural, or load one from a\r\n" +
+                "     .prg + .sym pair, a sprite-sheet .png (24x21 sprites, 2 px wide\r\n" +
+                "     pixels, black = transparent, max 3 colours) or a saved project (.json).\r\n" +
+                "  2. Draw pool pieces in the Single Sprite View (or in place in Positioned View).\r\n" +
+                "  3. In Construct, load a .kla backdrop, set the number of frames, and choose\r\n" +
+                "     each hardware sprite's Sprite # and X/Y per frame. Play to preview.\r\n" +
+                "  4. Save the project, then export ASM (plain or optimized) or a binary."
         };
         var creditLabel = new Label
         {
@@ -78,7 +85,8 @@ internal sealed class AboutDialog : Form
             Dock = DockStyle.Fill,
             Multiline = true,
             ReadOnly = true,
-            ScrollBars = ScrollBars.Vertical,
+            WordWrap = false,
+            ScrollBars = ScrollBars.Both,
             BorderStyle = BorderStyle.FixedSingle,
             BackColor = Color.FromArgb(30, 30, 30),
             ForeColor = Color.Gainsboro,
@@ -107,6 +115,13 @@ internal sealed class AboutDialog : Form
         Controls.Add(layout);
         AcceptButton = closeBtn;
         CancelButton = closeBtn;
+
+        // A read-only TextBox select-alls itself when it gets initial focus; focus Close instead.
+        Shown += (_, _) =>
+        {
+            shortcuts.Select(0, 0);
+            closeBtn.Focus();
+        };
     }
 
     private static string BuildShortcutsText() =>

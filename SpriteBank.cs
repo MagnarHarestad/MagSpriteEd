@@ -55,12 +55,19 @@ public sealed class SpriteBank
     // under the new one (see GetHiresPixel's bit packing).
     private bool[] _hires;
 
+    // Per-piece "Individual" colour (real C64 palette index) - purely how
+    // the editor DISPLAYS that piece (on hardware it's a per-sprite $d027+
+    // register), never part of the exported pixel data.
+    public const int DefaultIndividualColor = 8;
+    private int[] _individualColor;
+
     public SpriteBank(int pieceCount)
     {
         if (pieceCount < 1) throw new ArgumentOutOfRangeException(nameof(pieceCount));
         PieceCount = pieceCount;
         _pixels = new byte[pieceCount][,];
         _hires = new bool[pieceCount];
+        _individualColor = Enumerable.Repeat(DefaultIndividualColor, pieceCount).ToArray();
         for (int p = 0; p < pieceCount; p++)
             _pixels[p] = new byte[QuadRows, QuadCols];
     }
@@ -72,6 +79,9 @@ public sealed class SpriteBank
         if (value > 3) value = 3;
         _pixels[piece][row, col] = value;
     }
+
+    public int IndividualColor(int piece) => _individualColor[piece];
+    public void SetIndividualColor(int piece, int c64Index) => _individualColor[piece] = c64Index;
 
     public bool IsHires(int piece) => _hires[piece];
     public void SetHires(int piece, bool hires) => _hires[piece] = hires;
@@ -106,6 +116,66 @@ public sealed class SpriteBank
         _pixels[piece][row, col12] = cell;
     }
 
+    /// <summary>
+    /// Builds a bank from a PNG sprite sheet. The image is a grid of 24x21
+    /// multicolour sprites (each 12x21 cell is drawn 2 px wide, as C64 MC
+    /// pixels are), read left-to-right then top-to-bottom. Black (or fully
+    /// transparent) is transparent; the up-to-3 other colours become
+    /// MC1/Individual/MC2 in order of first appearance. slotColors[1..3]
+    /// returns the nearest real C64 palette index for each slot.
+    /// </summary>
+    public static SpriteBank LoadFromPng(string path, out int[] slotColors, out string log)
+    {
+        using var bmp = new System.Drawing.Bitmap(path);
+        const int SheetSpriteW = QuadCols * 2;
+        if (bmp.Width % SheetSpriteW != 0 || bmp.Height % QuadRows != 0)
+            throw new InvalidDataException($"PNG is {bmp.Width}x{bmp.Height}; width must be a multiple of {SheetSpriteW} and height a multiple of {QuadRows}.");
+
+        int perRow = bmp.Width / SheetSpriteW, rows = bmp.Height / QuadRows;
+        var slotOf = new Dictionary<int, byte>();
+        var slotRgb = new int[4];
+        var bank = new SpriteBank(perRow * rows);
+        for (int p = 0; p < bank.PieceCount; p++)
+        {
+            int ox = p % perRow * SheetSpriteW, oy = p / perRow * QuadRows;
+            for (int r = 0; r < QuadRows; r++)
+                for (int c = 0; c < QuadCols; c++)
+                {
+                    var a = bmp.GetPixel(ox + c * 2, oy + r);
+                    var b = bmp.GetPixel(ox + c * 2 + 1, oy + r);
+                    if (a.ToArgb() != b.ToArgb())
+                        throw new InvalidDataException($"Sprite {p}: pixels at ({ox + c * 2},{oy + r}) are not doubled horizontally (multicolour pixels must be 2 px wide).");
+                    if (a.A < 128 || (a.R | a.G | a.B) == 0) continue;
+                    int rgb = a.ToArgb() & 0xFFFFFF;
+                    if (!slotOf.TryGetValue(rgb, out byte slot))
+                    {
+                        if (slotOf.Count == 3)
+                            throw new InvalidDataException("PNG uses more than 3 non-transparent colours (plus black).");
+                        slot = (byte)(slotOf.Count + 1);
+                        slotOf[rgb] = slot;
+                        slotRgb[slot] = rgb;
+                    }
+                    bank.Set(p, r, c, slot);
+                }
+        }
+
+        slotColors = new int[4];
+        for (int s = 1; s <= 3; s++)
+        {
+            int best = 0, bestD = int.MaxValue;
+            for (int i = 0; i < 16; i++)
+            {
+                var pc = BackdropPicture.Palette[i];
+                int dr = pc.R - ((slotRgb[s] >> 16) & 255), dg = pc.G - ((slotRgb[s] >> 8) & 255), db = pc.B - (slotRgb[s] & 255);
+                int d = dr * dr + dg * dg + db * db;
+                if (d < bestD) { bestD = d; best = i; }
+            }
+            slotColors[s] = best;
+        }
+        log = $"Loaded {bank.PieceCount} sprites from {Path.GetFileName(path)} ({slotOf.Count} colours).";
+        return bank;
+    }
+
     public byte[,] Piece(int piece) => _pixels[piece];
 
     public byte[,] ClonePiece(int piece)
@@ -128,13 +198,16 @@ public sealed class SpriteBank
         if (newPieceCount < 1) newPieceCount = 1;
         var newPixels = new byte[newPieceCount][,];
         var newHires = new bool[newPieceCount];
+        var newInd = new int[newPieceCount];
         for (int p = 0; p < newPieceCount; p++)
         {
             newPixels[p] = p < PieceCount ? _pixels[p] : new byte[QuadRows, QuadCols];
             newHires[p] = p < PieceCount && _hires[p];
+            newInd[p] = p < PieceCount ? _individualColor[p] : DefaultIndividualColor;
         }
         _pixels = newPixels;
         _hires = newHires;
+        _individualColor = newInd;
         PieceCount = newPieceCount;
     }
 
@@ -445,6 +518,9 @@ public sealed class SpriteBank
         // every piece already effectively was before this flag existed.
         public bool[] Hires { get; set; } = Array.Empty<bool>();
 
+        // Per-piece Individual colour (C64 palette index); absent in older files.
+        public int[] IndividualColors { get; set; } = Array.Empty<int>();
+
         // Legacy (pre flat-pool) shape - only ever populated by an OLD
         // project file being deserialized, never written by ExportData.
         public int FrameCount { get; set; }
@@ -453,7 +529,7 @@ public sealed class SpriteBank
 
     public SpriteBankData ExportData()
     {
-        var data = new SpriteBankData { PieceCount = PieceCount, Pieces = new byte[PieceCount][][], Hires = new bool[PieceCount] };
+        var data = new SpriteBankData { PieceCount = PieceCount, Pieces = new byte[PieceCount][][], Hires = new bool[PieceCount], IndividualColors = new int[PieceCount] };
         for (int p = 0; p < PieceCount; p++)
         {
             data.Pieces[p] = new byte[QuadRows][];
@@ -464,6 +540,7 @@ public sealed class SpriteBank
                     data.Pieces[p][r][c] = _pixels[p][r, c];
             }
             data.Hires[p] = _hires[p];
+            data.IndividualColors[p] = _individualColor[p];
         }
         return data;
     }
@@ -479,6 +556,8 @@ public sealed class SpriteBank
                         bank._pixels[p][r, c] = data.Pieces[p][r][c];
             for (int p = 0; p < data.PieceCount && p < data.Hires.Length; p++)
                 bank._hires[p] = data.Hires[p];
+            for (int p = 0; p < data.PieceCount && p < data.IndividualColors.Length; p++)
+                bank._individualColor[p] = data.IndividualColors[p];
             return bank;
         }
 
