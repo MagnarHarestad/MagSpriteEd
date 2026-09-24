@@ -8,16 +8,16 @@ namespace MagSpriteEd;
 
 /// <summary>
 /// Composites the backdrop picture with the 8 hardware sprites at their
-/// CURRENT frame's positions, and lets the user drag/nudge them. Frame-
-/// agnostic by design - ConstructPanel swaps SpriteX/SpriteY in and out as
-/// the active frame changes, so this control only ever sees "the current
-/// frame's 8 positions".
+/// CURRENT frame's positions. Frame-agnostic by design - ConstructPanel
+/// swaps SpriteX/SpriteY in and out as the active frame changes, so this
+/// control only ever sees "the current frame's 8 positions".
 ///
-/// Supports grouping: Ctrl+click toggles a sprite in/out of the selection,
-/// and clicking (without Ctrl) an already-selected member of a multi-sprite
-/// selection keeps the whole group selected instead of collapsing it to
-/// one - that's what lets a drag started on any member move the whole
-/// group together, preserving everyone's relative offsets.
+/// Mouse: plain left/right drag draws on / erases the sprite under the
+/// cursor (raised as CellInteract - MainForm applies the edit), Shift+click
+/// selects a sprite and Shift+drag moves the selection, Ctrl+click toggles
+/// a sprite in/out of the group. Shift-clicking an already-selected member
+/// of a multi-sprite selection keeps the whole group selected, so the drag
+/// moves everyone together. Middle-drag pans, the wheel zooms.
 /// </summary>
 internal sealed class ConstructCanvas : Control
 {
@@ -77,11 +77,24 @@ internal sealed class ConstructCanvas : Control
     /// <summary>Fired whenever any selected sprite's position changes (drag or nudge).</summary>
     public event Action? SpriteMoved;
 
+    /// <summary>spriteIndex, row, col, button - a plain (no-modifier) left
+    /// or right click/drag landed on that sprite pixel. col is 0..11 for a
+    /// multicolour sprite, 0..23 for a hires one (see IsSpriteHires).</summary>
+    public event Action<int, int, int, MouseButtons>? CellInteract;
+    /// <summary>Bracket one paint drag, so the owner can take one undo
+    /// snapshot per piece per stroke rather than per pixel.</summary>
+    public event Action? PaintStrokeStarted;
+    public event Action? PaintStrokeEnded;
+
+    private bool _painting;
+    private MouseButtons _paintButton;
+    private (int sprite, int row, int col) _lastPaint = (-1, -1, -1);
+
     private bool _dragging;
     private int _dragStartMouseX, _dragStartMouseY;
     private readonly Dictionary<int, (int x, int y)> _dragStart = new();
 
-    // Middle-button pan (same gesture as PositionedEditCanvas). Tracked in
+    // Middle-button pan. Tracked in
     // SCREEN coordinates: scrolling the parent moves this control itself,
     // so control-relative mouse positions would shift under the drag.
     private bool _panning;
@@ -251,8 +264,30 @@ internal sealed class ConstructCanvas : Control
             return;
         }
 
+        // Plain left/right = draw on the sprite under the cursor; Shift =
+        // select (and drag to move); Ctrl = add/remove from the group.
         bool ctrl = (ModifierKeys & Keys.Control) != 0;
+        bool shift = (ModifierKeys & Keys.Shift) != 0;
 
+        if (e.Button == MouseButtons.Left && (ctrl || shift))
+        {
+            SelectAt(e, ctrl);
+            return;
+        }
+        if (ctrl || shift) return;
+
+        if (e.Button is MouseButtons.Left or MouseButtons.Right)
+        {
+            _painting = true;
+            _paintButton = e.Button;
+            _lastPaint = (-1, -1, -1);
+            PaintStrokeStarted?.Invoke();
+            PaintAt(e.Location, e.Button);
+        }
+    }
+
+    private void SelectAt(MouseEventArgs e, bool ctrl)
+    {
         for (int s = 7; s >= 0; s--)
         {
             if (!SpriteRect(s).Contains(e.Location)) continue;
@@ -263,11 +298,11 @@ internal sealed class ConstructCanvas : Control
             }
             else if (!SelectedSprites.Contains(s))
             {
-                // Fresh click on a sprite outside the current group starts a new single selection.
+                // Shift-click on a sprite outside the current group starts a new single selection.
                 SelectedSprites.Clear();
                 SelectedSprites.Add(s);
             }
-            // else: clicking an already-selected member of a multi-selection keeps
+            // else: Shift-clicking an already-selected member of a multi-selection keeps
             // the whole group selected, so the drag below moves everyone together.
             PrimarySelected = s;
 
@@ -292,6 +327,33 @@ internal sealed class ConstructCanvas : Control
         }
     }
 
+    /// <summary>Raises CellInteract for the sprite pixel under the cursor,
+    /// once per cell. Topmost sprite wins (same order they're drawn in).
+    /// Nothing is painted in the border: it covers the sprites there, so
+    /// you couldn't see what you drew.</summary>
+    private void PaintAt(Point p, MouseButtons button)
+    {
+        float fx = p.X / Zoom, fy = p.Y / Zoom;
+        if (fx < BorderLeft || fx >= BorderLeft + BackdropPicture.Width ||
+            fy < BorderTop || fy >= BorderTop + BackdropPicture.Height)
+            return;
+
+        for (int s = 7; s >= 0; s--)
+        {
+            float sx = fx - FrameX(SpriteX[s]);
+            float sy = fy - FrameY(SpriteY[s]);
+            if (sx < 0 || sx >= SpriteScreenW || sy < 0 || sy >= SpriteScreenH) continue;
+
+            bool hires = IsSpriteHires?.Invoke(s) ?? false;
+            int col = hires ? (int)sx : (int)(sx / 2);
+            int row = (int)sy;
+            if ((s, row, col) == _lastPaint) return;
+            _lastPaint = (s, row, col);
+            CellInteract?.Invoke(s, row, col, button);
+            return;
+        }
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -304,6 +366,11 @@ internal sealed class ConstructCanvas : Control
                     _panStartScroll.X - (now.X - _panStartScreen.X),
                     _panStartScroll.Y - (now.Y - _panStartScreen.Y));
             }
+            return;
+        }
+        if (_painting)
+        {
+            if ((e.Button & _paintButton) != 0) PaintAt(e.Location, _paintButton);
             return;
         }
         if (!_dragging || SelectedSprites.Count == 0) return;
@@ -328,15 +395,18 @@ internal sealed class ConstructCanvas : Control
             Cursor = Cursors.Default;
             return;
         }
+        if (_painting && e.Button == _paintButton)
+        {
+            _painting = false;
+            PaintStrokeEnded?.Invoke();
+        }
         _dragging = false;
     }
 
-    /// <summary>Replaces the old Zoom combo box that lived in the removed
-    /// Backdrop panel - scroll to zoom, same as PositionedEditCanvas
-    /// already does. This control has no pan offset of its own (unlike
-    /// PositionedEditCanvas): it just resizes, and the containing AutoScroll
-    /// panel (ConstructPanel's canvasScroll) handles bringing whatever's now
-    /// off-screen back into view.</summary>
+    /// <summary>Scroll to zoom. This control has no pan offset of its own:
+    /// it just resizes, and the containing AutoScroll panel (ConstructPanel's
+    /// canvasScroll) handles bringing whatever's now off-screen back into
+    /// view.</summary>
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);

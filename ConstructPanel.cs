@@ -76,8 +76,8 @@ public sealed class ConstructPanel : UserControl
     // SpriteBank. Each entry snapshots one frame's full 8-sprite state,
     // pushed right before a drag, a keyboard nudge, or an X/Y/Sprite# field
     // edit changes it.
-    private readonly List<(int frame, int[] x, int[] y, int[] source)> _posUndo = new();
-    private readonly List<(int frame, int[] x, int[] y, int[] source)> _posRedo = new();
+    private readonly List<(int frame, int[] x, int[] y, int[] source, long seq)> _posUndo = new();
+    private readonly List<(int frame, int[] x, int[] y, int[] source, long seq)> _posRedo = new();
     private const int PosUndoCap = 100;
 
     // One frame's worth of copied position+source data - see
@@ -114,6 +114,13 @@ public sealed class ConstructPanel : UserControl
             _canvas.Invalidate();
         }
     }
+
+    /// <summary>A plain left/right click or drag landed on a sprite pixel in
+    /// Construct (spriteIndex, row, col, button) - MainForm applies the
+    /// current drawing tool to that sprite's piece.</summary>
+    public event Action<int, int, int, MouseButtons>? SpriteCellPainted;
+    public event Action? PaintStrokeStarted;
+    public event Action? PaintStrokeEnded;
 
     public ConstructPanel(Func<SpriteBank> bankProvider, Func<BackdropPicture?> backdropProvider)
     {
@@ -196,19 +203,25 @@ public sealed class ConstructPanel : UserControl
         _canvas.SelectionChanged += () => { RefreshInspector(); SelectedSpriteSourceChanged?.Invoke(); };
         _canvas.SpriteMoved += CommitCanvasPositionsToCurrentFrame;
         _canvas.ZoomChanged += RefreshInspector;
+        _canvas.CellInteract += (s, row, col, button) => SpriteCellPainted?.Invoke(s, row, col, button);
+        _canvas.PaintStrokeStarted += () => PaintStrokeStarted?.Invoke();
+        _canvas.PaintStrokeEnded += () => PaintStrokeEnded?.Invoke();
         // These are the base Control.MouseDown/KeyDown events (raised via
         // base.OnMouseDown/base.OnKeyDown as the FIRST line of ConstructCanvas's
         // own overrides), so they fire before any position is actually
-        // changed - the correct moment to snapshot for undo. MouseDown covers
-        // the start of every drag; KeyDown covers arrow-key nudges and also
-        // doubles as the Ctrl+Z/Ctrl+Y shortcut while the canvas has focus.
-        // Not for the middle button - that only pans the view.
-        _canvas.MouseDown += (_, e) => { if (e.Button != MouseButtons.Middle) PushPositionUndo(); };
+        // changed - the correct moment to snapshot for undo. Only Shift/Ctrl
+        // clicks select and move sprites; a plain click draws (MainForm takes
+        // the pixel undo snapshot for that) and middle only pans. KeyDown
+        // covers arrow-key nudges. Ctrl+Z/Y is handled by MainForm, which
+        // undoes whichever of a drawing or a placement change is newest.
+        _canvas.MouseDown += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left && (ModifierKeys & (Keys.Shift | Keys.Control)) != 0)
+                PushPositionUndo();
+        };
         _canvas.KeyDown += (_, e) =>
         {
-            if (e.Control && e.KeyCode == Keys.Z && !e.Shift) { UndoPosition(); return; }
-            if (e.Control && (e.KeyCode == Keys.Y || (e.KeyCode == Keys.Z && e.Shift))) { RedoPosition(); return; }
-            if (_canvas.SelectedSprites.Count > 0 && e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down)
+            if (!e.Control && _canvas.SelectedSprites.Count > 0 && e.KeyCode is Keys.Left or Keys.Right or Keys.Up or Keys.Down)
                 PushPositionUndo();
         };
 
@@ -582,19 +595,32 @@ public sealed class ConstructPanel : UserControl
     private void PushPositionUndo()
     {
         EnsureArraysAllocated();
-        _posUndo.Add((_frame, (int[])_posX[_frame].Clone(), (int[])_posY[_frame].Clone(), (int[])_spriteSource[_frame].Clone()));
+        _posUndo.Add((_frame, (int[])_posX[_frame].Clone(), (int[])_posY[_frame].Clone(), (int[])_spriteSource[_frame].Clone(), UndoClock.Next()));
         while (_posUndo.Count > PosUndoCap) _posUndo.RemoveAt(0);
         _posRedo.Clear();
+        PositionEdited?.Invoke();
     }
 
-    private void UndoPosition()
+    /// <summary>A new position/Sprite # edit was recorded - MainForm clears
+    /// its own pixel redo stack on this, so the shared history stays linear.</summary>
+    public event Action? PositionEdited;
+
+    /// <summary>UndoClock stamps of the newest undo/redo entries (0 = empty) -
+    /// MainForm compares these with its pixel stacks to undo/redo whichever
+    /// change is most recent.</summary>
+    public long PositionUndoTopSeq => _posUndo.Count > 0 ? _posUndo[^1].seq : 0;
+    public long PositionRedoTopSeq => _posRedo.Count > 0 ? _posRedo[^1].seq : 0;
+
+    public void ClearPositionRedo() => _posRedo.Clear();
+
+    public void UndoPosition()
     {
         if (_posUndo.Count == 0) return;
         var last = _posUndo[^1];
         _posUndo.RemoveAt(_posUndo.Count - 1);
         EnsureArraysAllocated();
         if (last.frame >= _animFrameCount) return; // frame count shrank since this entry was pushed
-        _posRedo.Add((last.frame, (int[])_posX[last.frame].Clone(), (int[])_posY[last.frame].Clone(), (int[])_spriteSource[last.frame].Clone()));
+        _posRedo.Add((last.frame, (int[])_posX[last.frame].Clone(), (int[])_posY[last.frame].Clone(), (int[])_spriteSource[last.frame].Clone(), last.seq));
         Array.Copy(last.x, _posX[last.frame], 8);
         Array.Copy(last.y, _posY[last.frame], 8);
         Array.Copy(last.source, _spriteSource[last.frame], 8);
@@ -602,14 +628,14 @@ public sealed class ConstructPanel : UserControl
         LoadFrameIntoCanvas();
     }
 
-    private void RedoPosition()
+    public void RedoPosition()
     {
         if (_posRedo.Count == 0) return;
         var last = _posRedo[^1];
         _posRedo.RemoveAt(_posRedo.Count - 1);
         EnsureArraysAllocated();
         if (last.frame >= _animFrameCount) return;
-        _posUndo.Add((last.frame, (int[])_posX[last.frame].Clone(), (int[])_posY[last.frame].Clone(), (int[])_spriteSource[last.frame].Clone()));
+        _posUndo.Add((last.frame, (int[])_posX[last.frame].Clone(), (int[])_posY[last.frame].Clone(), (int[])_spriteSource[last.frame].Clone(), last.seq));
         Array.Copy(last.x, _posX[last.frame], 8);
         Array.Copy(last.y, _posY[last.frame], 8);
         Array.Copy(last.source, _spriteSource[last.frame], 8);
@@ -712,15 +738,6 @@ public sealed class ConstructPanel : UserControl
     {
         RecomputeD010Label();
         _canvas.Invalidate();
-    }
-
-    /// <summary>Read-only accessors so MainForm's positioned edit view can
-    /// mirror this panel's live placement without duplicating its state.</summary>
-    public (int x, int y) GetPosition(int frame, int spriteIndex)
-    {
-        EnsureArraysAllocated();
-        int f = Math.Max(0, Math.Min(frame, _animFrameCount - 1));
-        return (_posX[f][spriteIndex], _posY[f][spriteIndex]);
     }
 
     /// <summary>The piece index into the bank's flat pool this hardware

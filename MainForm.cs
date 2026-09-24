@@ -15,14 +15,14 @@ public sealed class MainForm : Form
     // A real C64 multicolour sprite pixel is twice as wide as it is tall
     // (it occupies 2 hires dot-widths but only 1 scanline), so the cell
     // width FitCanvasToScrollArea picks is always exactly double its
-    // height, matching PositionedEditCanvas's own 2x-wide pixel rectangles.
+    // height, matching Construct's own 2x-wide pixel rectangles.
     private const int MinEditCellHeight = 10;
     private const int MaxEditCellHeight = 36;
 
     private SpriteBank _bank = CreateDefaultBank();
 
     // Which animation/Timeline frame is active (drives Construct's
-    // positions and the Positioned view) - decoupled from both which
+    // positions) - decoupled from both which
     // SpriteBank piece Single Sprite View is editing (_editPiece) AND from
     // the bank's own PieceCount (the Timeline's length and the pool's size
     // are two entirely independent numbers - see ConstructPanel).
@@ -49,12 +49,12 @@ public sealed class MainForm : Form
     private byte _selectedColor = 1;
     private bool _mirror;
 
-    private readonly List<(int piece, byte[,] snapshot)> _undo = new();
-    private readonly List<(int piece, byte[,] snapshot)> _redo = new();
+    private readonly List<(int piece, byte[,] snapshot, long seq)> _undo = new();
+    private readonly List<(int piece, byte[,] snapshot, long seq)> _redo = new();
     private const int UndoCap = 100;
 
-    // Line tool state (flat editor only - the positioned view simplifies
-    // Line to paint-per-cell, see PositionedCanvas_CellInteract)
+    // Line tool state (flat editor only - drawing in Construct simplifies
+    // Line to paint-per-cell, see ConstructCanvas_CellInteract)
     private int _lineStartRow = -1, _lineStartCol = -1;
     private int _hoverRow = -1, _hoverCol = -1;
 
@@ -63,10 +63,8 @@ public sealed class MainForm : Form
     private Panel _canvasScroll = null!;
     private SpritePoolStrip _spritePoolStrip = null!;
     private Panel _spritePoolScroll = null!;
-    private ColumnStyle _poolColumn = null!;
-    private PositionedEditCanvas _positionedCanvas = null!;
-    private ToolStripButton _positionedModeBtn = null!;
-    private readonly HashSet<int> _positionedStrokePieces = new();
+    // Pieces already snapshotted for undo in the current Construct paint stroke.
+    private readonly HashSet<int> _constructStrokePieces = new();
 
     private ConstructPanel _constructPanel = null!;
     private ToolStripStatusLabel _statusLabel = null!;
@@ -160,8 +158,8 @@ public sealed class MainForm : Form
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 960));
 
         // ---- Left: edit canvas - Single Sprite View (one 12x21 piece,
-        // highly zoomed in - the default) or Positioned view (zoomed, in
-        // place over the backdrop, panned with middle-drag) ----
+        // highly zoomed in). Drawing in place over the backdrop happens in
+        // Construct itself (see ConstructCanvas_CellInteract). ----
         _canvas = new PixelGridControl(SpriteBank.QuadRows, SpriteBank.QuadCols, MaxEditCellHeight * 2, MaxEditCellHeight)
         {
             // Hires "on" is remapped to value 2 (Individual) purely for
@@ -178,42 +176,13 @@ public sealed class MainForm : Form
         _canvasScroll.Controls.Add(_canvas);
         _canvas.Location = new Point(20, 20);
         // Re-fit whenever the host area's size actually changes (window
-        // resize, Positioned view toggling off and giving this back the
-        // full width, etc.) - keeps the canvas at the largest zoom that
-        // still needs no horizontal scrollbar.
+        // resize etc.) - keeps the canvas at the largest zoom that still
+        // needs no horizontal scrollbar.
         _canvasScroll.SizeChanged += (_, _) => FitCanvasToScrollArea();
 
-        _positionedCanvas = new PositionedEditCanvas
-        {
-            Dock = DockStyle.Fill,
-            Visible = false,
-            PositionProvider = s => _constructPanel.GetPosition(_currentFrame, s),
-            SpritePixel = (s, row, col) =>
-            {
-                int source = _constructPanel.GetSpriteSource(_currentFrame, s);
-                return source >= 0 && source < _bank.PieceCount ? _bank.Get(source, row, col) : (byte)0;
-            },
-            PaletteProvider = (v, s) =>
-            {
-                int source = _constructPanel.GetSpriteSource(_currentFrame, s);
-                int ind = source >= 0 && source < _bank.PieceCount ? _bank.IndividualColor(source) : SpriteBank.DefaultIndividualColor;
-                return EditorPalette.ColorFor(v, ind);
-            },
-            IsSpriteHires = s =>
-            {
-                int source = _constructPanel.GetSpriteSource(_currentFrame, s);
-                return source >= 0 && source < _bank.PieceCount && _bank.IsHires(source);
-            }
-        };
-
-        var centerHost = new Panel { Dock = DockStyle.Fill };
-        centerHost.Controls.Add(_positionedCanvas);
-        centerHost.Controls.Add(_canvasScroll);
-
         // ---- Far left: vertical strip of every pool piece as a small
-        // thumbnail (Single Sprite View only - hidden in Positioned view,
-        // see SetPositionedMode). Click one to make it Single Sprite View's
-        // edit target; thumbnails update live while drawing via RefreshAll. ----
+        // thumbnail. Click one to make it Single Sprite View's edit target;
+        // thumbnails update live while drawing via RefreshAll. ----
         _spritePoolStrip = new SpritePoolStrip
         {
             PixelProvider = (piece, r, c) => _bank.Get(piece, r, c),
@@ -256,11 +225,10 @@ public sealed class MainForm : Form
             RowCount = 1,
             BackColor = BackColor
         };
-        _poolColumn = new ColumnStyle(SizeType.Absolute, SpritePoolStrip.PreferredWidth + 4);
-        editArea.ColumnStyles.Add(_poolColumn);
+        editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SpritePoolStrip.PreferredWidth + 4));
         editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         editArea.Controls.Add(_spritePoolScroll, 0, 0);
-        editArea.Controls.Add(centerHost, 1, 0);
+        editArea.Controls.Add(_canvasScroll, 1, 0);
 
         // ---- Right: embedded Construct panel (placement/composition over
         // the backdrop) - also the sole frame navigator now; the FRAMES
@@ -268,6 +236,12 @@ public sealed class MainForm : Form
         // backdrop is only ever done via this Menu's own item now (see
         // BuildToolbar) - ConstructPanel no longer has its own button. ----
         _constructPanel = new ConstructPanel(() => _bank, () => _backdrop);
+        // Drawing directly on a sprite in Construct (plain left/right drag).
+        _constructPanel.SpriteCellPainted += ConstructCanvas_CellInteract;
+        _constructPanel.PaintStrokeStarted += () => _constructStrokePieces.Clear();
+        _constructPanel.PaintStrokeEnded += () => _constructStrokePieces.Clear();
+        // A new placement edit makes any pixel redo stale - keeps the shared history linear.
+        _constructPanel.PositionEdited += () => _redo.Clear();
         _constructPanel.FrameChanged += frame =>
         {
             _currentFrame = Math.Max(0, Math.Min(frame, _constructPanel.AnimFrameCount - 1));
@@ -442,7 +416,6 @@ public sealed class MainForm : Form
         {
             UpdateSwatchIcons();
             _canvas.Invalidate();
-            _positionedCanvas.Invalidate();
             _spritePoolStrip.Invalidate();
             _constructPanel.RefreshVicColors();
         };
@@ -486,18 +459,6 @@ public sealed class MainForm : Form
         _toolbar.Items.Add(_lineBtn);
         _toolbar.Items.Add(_mirrorBtn);
 
-        _toolbar.Items.Add(new ToolStripSeparator());
-
-        _positionedModeBtn = new ToolStripButton
-        {
-            Image = Icons.Target(),
-            DisplayStyle = ToolStripItemDisplayStyle.Image,
-            ToolTipText = "Positioned view: edit sprites in place over the backdrop, as arranged in Construct (middle-drag to pan, wheel to zoom)",
-            CheckOnClick = true
-        };
-        _positionedModeBtn.CheckedChanged += (_, _) => SetPositionedMode(_positionedModeBtn.Checked);
-        _toolbar.Items.Add(_positionedModeBtn);
-
 
         _toolbar.Items.Add(new ToolStripSeparator());
 
@@ -524,8 +485,8 @@ public sealed class MainForm : Form
         _toolbar.Items.Add(new ToolStripSeparator());
 
         // -- Undo / redo (pixel art) --
-        AddToolbarButton(Icons.Undo(), "Undo", (_, _) => Undo());
-        AddToolbarButton(Icons.Redo(), "Redo", (_, _) => Redo());
+        AddToolbarButton(Icons.Undo(), "Undo last change - drawing or sprite placement (Ctrl+Z)", (_, _) => UndoLatest());
+        AddToolbarButton(Icons.Redo(), "Redo (Ctrl+Y)", (_, _) => RedoLatest());
 
         _toolbar.Items.Add(new ToolStripSeparator());
 
@@ -689,9 +650,9 @@ public sealed class MainForm : Form
     /// canvas for whichever of multicolour (12 double-width columns) or
     /// hires (24 square columns) _editPiece currently is - both cover the
     /// exact same total physical width (24 hires-dot-widths either way), so
-    /// the same "unit" size drives both column counts. Called on resize,
-    /// when Positioned view hands the area back, and whenever _editPiece or
-    /// its hires flag changes (see RefreshAll/SyncHiresButton).</summary>
+    /// the same "unit" size drives both column counts. Called on resize and
+    /// whenever _editPiece or its hires flag changes (see RefreshAll/
+    /// SyncHiresButton).</summary>
     private void FitCanvasToScrollArea()
     {
         int availW = _canvasScroll.ClientSize.Width - _canvasScroll.Padding.Horizontal;
@@ -735,71 +696,26 @@ public sealed class MainForm : Form
             : "Multicolour sprite (click to switch this sprite to hires)";
     }
 
-    private void SetPositionedMode(bool positioned)
-    {
-        _canvasScroll.Visible = !positioned;
-        _spritePoolScroll.Visible = !positioned;
-        // Hiding the strip alone leaves its fixed-width column empty - collapse it too.
-        _poolColumn.Width = positioned ? 0 : SpritePoolStrip.PreferredWidth + 4;
-        _positionedCanvas.Visible = positioned;
-        // The icon shows what clicking again will switch TO, not the
-        // current state - so it flips to "Single Sprite View" once you're
-        // in Positioned view, and back to "Positioned view" otherwise.
-        _positionedModeBtn.Image = positioned ? Icons.SingleSprite() : Icons.Target();
-        _positionedModeBtn.ToolTipText = positioned
-            ? "Single Sprite View: edit one 12x21 sprite piece, zoomed in"
-            : "Positioned view: edit sprites in place over the backdrop, as arranged in Construct (middle-drag to pan, wheel to zoom)";
-        if (positioned)
-        {
-            _positionedCanvas.Backdrop = _backdrop?.Image;
-            _positionedCanvas.Invalidate();
-        }
-        else
-        {
-            // Positioned view can have edited pieces the strip never
-            // repainted while hidden (it only tracks _editPiece, not
-            // whichever piece a Positioned-view sprite happened to show) -
-            // refresh every thumbnail once on the way back in.
-            _spritePoolStrip.Invalidate();
-            ScrollPoolStripToSelection();
-            FitCanvasToScrollArea();
-        }
-    }
-
     private void WireEvents()
     {
         _canvas.CellInteract += Canvas_CellInteract;
         _canvas.MouseDown += Canvas_MouseDown;
         _canvas.MouseUp += Canvas_MouseUp;
-
-        _positionedCanvas.CellInteract += PositionedCanvas_CellInteract;
-        _positionedCanvas.MouseDown += (_, e) => { if (e.Button is MouseButtons.Left or MouseButtons.Right) _positionedStrokePieces.Clear(); };
-        _positionedCanvas.MouseUp += (_, _) => _positionedStrokePieces.Clear();
     }
 
     // ---------------------------------------------------------------------
     // App-wide keyboard shortcuts. KeyPreview routes every KeyDown through
-    // here FIRST regardless of which control has focus - ConstructPanel's
-    // own canvas already handles Ctrl+Z/Y for POSITION undo when it has
-    // focus, so this only takes over when focus is anywhere else (leaving
-    // e.Handled unset lets the child control's own handler still run).
+    // here FIRST regardless of which control has focus; setting e.Handled
+    // stops the focused control from seeing it too.
     // ---------------------------------------------------------------------
     private void MainForm_KeyDown(object? sender, KeyEventArgs e)
     {
-        bool inConstruct = _constructPanel.ContainsFocus;
-
-        if (e.Control && e.KeyCode == Keys.Z && !e.Shift)
+        bool undoKey = e.Control && e.KeyCode == Keys.Z && !e.Shift;
+        bool redoKey = e.Control && (e.KeyCode == Keys.Y || (e.KeyCode == Keys.Z && e.Shift));
+        // Typing in a number field (X/Y, Frames, Pool...) keeps its own text undo.
+        if ((undoKey || redoKey) && !IsTextEntryFocused())
         {
-            if (inConstruct) return; // let ConstructCanvas's own Ctrl+Z (position undo) handle it
-            Undo();
-            e.Handled = true;
-            e.SuppressKeyPress = true;
-            return;
-        }
-        if (e.Control && (e.KeyCode == Keys.Y || (e.KeyCode == Keys.Z && e.Shift)))
-        {
-            if (inConstruct) return;
-            Redo();
+            if (undoKey) UndoLatest(); else RedoLatest();
             e.Handled = true;
             e.SuppressKeyPress = true;
             return;
@@ -921,12 +837,12 @@ public sealed class MainForm : Form
     }
 
     // ---------------------------------------------------------------------
-    // Positioned canvas interaction - same tools, but the piece to edit is
-    // resolved from wherever the click landed rather than read directly
-    // off _editPiece, since each of the 8 sprites can show a different
-    // piece than whatever Single Sprite View currently has selected.
+    // Drawing directly in Construct - same tools as Single Sprite View, but
+    // the piece to edit is resolved from wherever the click landed rather
+    // than read off _editPiece, since each of the 8 sprites can show a
+    // different piece than whatever Single Sprite View has selected.
     // ---------------------------------------------------------------------
-    private void PositionedCanvas_CellInteract(int spriteIndex, int row, int col, MouseButtons button)
+    private void ConstructCanvas_CellInteract(int spriteIndex, int row, int col, MouseButtons button)
     {
         if (button != MouseButtons.Left && button != MouseButtons.Right) return;
 
@@ -937,7 +853,7 @@ public sealed class MainForm : Form
         // One undo snapshot per distinct piece touched in this stroke (a
         // drag can cross from one sprite into another, possibly resolving
         // to a different piece each time), not one per cell.
-        if (_positionedStrokePieces.Add(source)) PushUndo(source);
+        if (_constructStrokePieces.Add(source)) PushUndo(source);
 
         byte color = button == MouseButtons.Right ? (byte)0 : _selectedColor;
         switch (_tool)
@@ -949,8 +865,8 @@ public sealed class MainForm : Form
                 // view's hit-testing/undo logic from having to duplicate the
                 // flat editor's separate line-preview machinery. col already
                 // arrives in the right 0..11/0..23 range for this piece's
-                // mode - PositionedEditCanvas's own hit-testing checks the
-                // same IsSpriteHires flag.
+                // mode - ConstructCanvas's own hit-testing checks the same
+                // IsSpriteHires flag.
                 SetPixel(source, hires, row, col, color);
                 if (_mirror)
                 {
@@ -1226,14 +1142,38 @@ public sealed class MainForm : Form
     }
 
     // ---------------------------------------------------------------------
-    // Undo / redo (pixel art)
+    // Undo / redo. Two stacks - pixel edits here, position/Sprite # edits in
+    // ConstructPanel - stamped from one shared UndoClock, so UndoLatest/
+    // RedoLatest (Ctrl+Z/Y and the toolbar buttons) step through ONE
+    // time-ordered history, whether the change was drawing or placement.
     // ---------------------------------------------------------------------
+    private void UndoLatest()
+    {
+        long pixel = _undo.Count > 0 ? _undo[^1].seq : 0;
+        long position = _constructPanel.PositionUndoTopSeq;
+        if (pixel == 0 && position == 0) { RefreshStatus("Nothing to undo."); return; }
+        if (pixel > position) Undo();
+        else { _constructPanel.UndoPosition(); RefreshStatus("Undid last sprite placement change."); }
+    }
+
+    private void RedoLatest()
+    {
+        // The most recently UNDONE change has the lowest stamp of the two
+        // redo tops (undo walks backwards through time).
+        long pixel = _redo.Count > 0 ? _redo[^1].seq : 0;
+        long position = _constructPanel.PositionRedoTopSeq;
+        if (pixel == 0 && position == 0) { RefreshStatus("Nothing to redo."); return; }
+        if (position == 0 || (pixel != 0 && pixel < position)) Redo();
+        else { _constructPanel.RedoPosition(); RefreshStatus("Redid sprite placement change."); }
+    }
+
     private void PushUndo(int? piece = null)
     {
         int p = piece ?? _editPiece;
-        _undo.Add((p, _bank.ClonePiece(p)));
+        _undo.Add((p, _bank.ClonePiece(p), UndoClock.Next()));
         TrimUndo();
         _redo.Clear();
+        _constructPanel.ClearPositionRedo();
     }
 
     private void PushUndoAll()
@@ -1244,10 +1184,11 @@ public sealed class MainForm : Form
         // Undo per-piece afterwards for anything else.
         for (int p = 0; p < _bank.PieceCount; p++)
         {
-            _undo.Add((p, _bank.ClonePiece(p)));
+            _undo.Add((p, _bank.ClonePiece(p), UndoClock.Next()));
         }
         TrimUndo();
         _redo.Clear();
+        _constructPanel.ClearPositionRedo();
     }
 
     private void TrimUndo()
@@ -1260,7 +1201,7 @@ public sealed class MainForm : Form
         if (_undo.Count == 0) { RefreshStatus("Nothing to undo."); return; }
         var last = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
-        _redo.Add((last.piece, _bank.ClonePiece(last.piece)));
+        _redo.Add((last.piece, _bank.ClonePiece(last.piece), last.seq));
         _bank.RestorePiece(last.piece, last.snapshot);
         _editPiece = last.piece;
         RefreshAll();
@@ -1272,7 +1213,7 @@ public sealed class MainForm : Form
         if (_redo.Count == 0) { RefreshStatus("Nothing to redo."); return; }
         var last = _redo[^1];
         _redo.RemoveAt(_redo.Count - 1);
-        _undo.Add((last.piece, _bank.ClonePiece(last.piece)));
+        _undo.Add((last.piece, _bank.ClonePiece(last.piece), last.seq));
         _bank.RestorePiece(last.piece, last.snapshot);
         _editPiece = last.piece;
         RefreshAll();
@@ -1292,7 +1233,6 @@ public sealed class MainForm : Form
         SyncHiresButton();
         FitCanvasToScrollArea();
         _canvas.Invalidate();
-        _positionedCanvas.Invalidate();
         RefreshStatus(null);
         // The Construct panel shares this same SpriteBank instance, but it's
         // a separate Control - it never repaints just because this canvas's
@@ -1312,7 +1252,6 @@ public sealed class MainForm : Form
     private void RefreshAfterPixelEdit(int piece)
     {
         _canvas.Invalidate();
-        _positionedCanvas.Invalidate();
         _constructPanel.RefreshSpriteArt();
         _spritePoolStrip.InvalidatePiece(piece);
     }
@@ -1618,8 +1557,6 @@ public sealed class MainForm : Form
     private void RefreshBackdropViews()
     {
         _constructPanel.RefreshBackdrop();
-        _positionedCanvas.Backdrop = _backdrop?.Image;
-        _positionedCanvas.Invalidate();
     }
 }
 

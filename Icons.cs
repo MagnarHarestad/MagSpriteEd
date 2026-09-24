@@ -261,31 +261,6 @@ internal static class Icons
         g.DrawLine(pen2, 3, 17, 17, 17);
     });
 
-    public static Bitmap Target() => Make(g =>
-    {
-        using var pen = new Pen(Stroke, 1.6f);
-        g.DrawEllipse(pen, 3, 3, 14, 14);
-        g.DrawEllipse(pen, 7, 7, 6, 6);
-        using var pen2 = new Pen(Stroke, 1.4f);
-        g.DrawLine(pen2, 10, 0, 10, 4);
-        g.DrawLine(pen2, 10, 16, 10, 20);
-        g.DrawLine(pen2, 0, 10, 4, 10);
-        g.DrawLine(pen2, 16, 10, 20, 10);
-    });
-
-    public static Bitmap SingleSprite() => Make(g =>
-    {
-        using var pen = new Pen(Stroke, 1.6f);
-        g.DrawRectangle(pen, 5, 2, 10, 16);
-        using var b = new SolidBrush(Stroke);
-        g.FillRectangle(b, 7, 5, 2, 2);
-        g.FillRectangle(b, 11, 5, 2, 2);
-        g.FillRectangle(b, 7, 9, 2, 2);
-        g.FillRectangle(b, 11, 9, 2, 2);
-        g.FillRectangle(b, 7, 13, 2, 2);
-        g.FillRectangle(b, 11, 13, 2, 2);
-    });
-
     public static Bitmap Info() => Make(g =>
     {
         using var pen = new Pen(Stroke, 1.6f);

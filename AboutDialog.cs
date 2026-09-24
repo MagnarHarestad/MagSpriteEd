@@ -56,7 +56,7 @@ internal sealed class AboutDialog : Form
                 "  1. Start a bank: New Blank / New Procedural, or load one from a\r\n" +
                 "     .prg + .sym pair, a sprite-sheet .png (24x21 sprites, 2 px wide\r\n" +
                 "     pixels, black = transparent, max 3 colours) or a saved project (.json).\r\n" +
-                "  2. Draw pool pieces in the Single Sprite View (or in place in Positioned View).\r\n" +
+                "  2. Draw pool pieces in the Single Sprite View, or right on the sprites in Construct.\r\n" +
                 "  3. In Construct, load a .kla backdrop, set the number of frames, and choose\r\n" +
                 "     each hardware sprite's Sprite # and X/Y per frame. Play to preview.\r\n" +
                 "  4. Save the project, then export ASM (plain or optimized) or a binary."
@@ -125,11 +125,12 @@ internal sealed class AboutDialog : Form
     }
 
     private static string BuildShortcutsText() =>
-        "DRAWING (Single Sprite View / Positioned View)\r\n" +
+        "DRAWING (Single Sprite View / directly on sprites in Construct)\r\n" +
         "  Left click / drag        Paint with the selected colour\r\n" +
         "  Right click / drag       Erase (paint Background)\r\n" +
         "  0 / 1 / 2 / 3            Select colour (Background / MC1 / MC2 / Individual)\r\n" +
-        "  Ctrl+Z / Ctrl+Y          Undo / redo pixel edit\r\n" +
+        "  Ctrl+Z / Ctrl+Y          Undo / redo the last change - drawing or sprite\r\n" +
+        "                           placement, in the order you made them\r\n" +
         "  Right-click a swatch     Change that swatch's real C64 colour - Background\r\n" +
         "                           ($d021), MC1 and MC2 are shared by all sprites,\r\n" +
         "                           Individual applies only to the sprite being edited\r\n" +
@@ -139,22 +140,20 @@ internal sealed class AboutDialog : Form
         "SPRITE POOL LIST (left of Single Sprite View)\r\n" +
         "  Click a thumbnail        Edit that pool piece\r\n" +
         "\r\n" +
-        "POSITIONED VIEW\r\n" +
-        "  Middle-click drag        Pan the view\r\n" +
-        "  Mouse wheel              Zoom in / out\r\n" +
-        "\r\n" +
-        "CONSTRUCT PANEL (sprite placement)\r\n" +
-        "  Drag                     Move the selected sprite(s)\r\n" +
-        "  Shift+drag / Shift+arrow Move by 8 pixels instead of 1\r\n" +
-        "  Arrow keys               Nudge the selected sprite(s) by 1 pixel\r\n" +
+        "CONSTRUCT PANEL\r\n" +
+        "  Left / right drag        Draw on / erase the sprite under the cursor\r\n" +
+        "                           (not in the border - it covers the sprites there)\r\n" +
+        "  Shift+click              Select a sprite (Shift on empty space deselects)\r\n" +
+        "  Shift+drag               Move the selected sprite(s)\r\n" +
         "  Ctrl+click               Add/remove a sprite from the selection group\r\n" +
-        "  Ctrl+Z / Ctrl+Y          Undo / redo position and Sprite # changes\r\n" +
+        "  Arrow keys               Nudge the selected sprite(s) by 1 pixel\r\n" +
+        "  Shift+arrow              Nudge by 8 pixels\r\n" +
         "  Mouse wheel              Zoom the composited preview in / out\r\n" +
         "  Middle-click drag        Pan the view\r\n" +
         "  Sprite inspector        Selecting a sprite shows a floating box next to it:\r\n" +
         "                           < / > step its Sprite # through the pool, and\r\n" +
         "                           X / Y set its position for the current frame\r\n" +
-        "  Menu > Show Grid         Toggles the checkerboard shown when no backdrop is loaded\r\n" +
+        "  Menu > Show Grid         Toggles a faint checkerboard when no backdrop is loaded\r\n" +
         "\r\n" +
         "TOOLS\r\n" +
         "  Pencil / Fill / Line     Left = paint, right = erase\r\n" +

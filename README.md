@@ -34,13 +34,13 @@ rename (still using the legacy `fire_frameN_*` labels) is also supported.
   (`.kla`/`.koa`) backdrop picture. Position (X/Y) and which pool piece each
   sprite shows ("Sprite #") are both keyframed per animation frame, with a
   scrubbable timeline, playback (adjustable FPS, ping-pong), and zoom.
-- **Positioned View** - Edit sprite pixels directly in place over the
-  backdrop, at whatever position/zoom Construct has set up, instead of only
-  in the flat single-sprite view.
+- **Draw in Construct** - Paint sprite pixels directly in place over the
+  backdrop, not only in the zoomed single-sprite view. Plain drag draws,
+  Shift+click selects, Shift+drag moves, Ctrl+click groups.
 - **Copy-on-write editing** - Drawing into a sprite that's shared by more
   than one (frame, hardware sprite) pair automatically forks it into a free
   pool slot first, so you never accidentally repaint art used elsewhere.
-- **Undo/redo** - Separate stacks for pixel edits and for
+- **Undo/redo** - One time-ordered history covering both pixel edits and
   position/composition changes.
 - **Procedural generator** - Seeds the whole pool (or a single piece) with a
   parametric flame shape as a starting point.
