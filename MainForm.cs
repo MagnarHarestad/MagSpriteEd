@@ -63,6 +63,7 @@ public sealed class MainForm : Form
     private Panel _canvasScroll = null!;
     private SpritePoolStrip _spritePoolStrip = null!;
     private Panel _spritePoolScroll = null!;
+    private ColumnStyle _poolColumn = null!;
     private PositionedEditCanvas _positionedCanvas = null!;
     private ToolStripButton _positionedModeBtn = null!;
     private readonly HashSet<int> _positionedStrokePieces = new();
@@ -255,7 +256,8 @@ public sealed class MainForm : Form
             RowCount = 1,
             BackColor = BackColor
         };
-        editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SpritePoolStrip.PreferredWidth + 4));
+        _poolColumn = new ColumnStyle(SizeType.Absolute, SpritePoolStrip.PreferredWidth + 4);
+        editArea.ColumnStyles.Add(_poolColumn);
         editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         editArea.Controls.Add(_spritePoolScroll, 0, 0);
         editArea.Controls.Add(centerHost, 1, 0);
@@ -737,6 +739,8 @@ public sealed class MainForm : Form
     {
         _canvasScroll.Visible = !positioned;
         _spritePoolScroll.Visible = !positioned;
+        // Hiding the strip alone leaves its fixed-width column empty - collapse it too.
+        _poolColumn.Width = positioned ? 0 : SpritePoolStrip.PreferredWidth + 4;
         _positionedCanvas.Visible = positioned;
         // The icon shows what clicking again will switch TO, not the
         // current state - so it flips to "Single Sprite View" once you're
