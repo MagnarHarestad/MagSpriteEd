@@ -93,6 +93,12 @@ public sealed class MainForm : Form
 
     private static readonly byte[] IndividualPaletteIndex = { 8, 10, 8, 10, 10, 8, 10, 8 };
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        DarkTitleBar.Apply(this);
+    }
+
     public MainForm()
     {
         Text = "MagSpriteEd v1.0";

@@ -12,6 +12,12 @@ namespace MagSpriteEd;
 /// </summary>
 internal sealed class AboutDialog : Form
 {
+    protected override void OnHandleCreated(System.EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        DarkTitleBar.Apply(this);
+    }
+
     public AboutDialog()
     {
         Text = "About MagSpriteEd";
