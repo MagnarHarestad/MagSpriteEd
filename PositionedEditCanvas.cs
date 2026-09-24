@@ -73,8 +73,11 @@ internal sealed class PositionedEditCanvas : Control
 
         using (var bg = new SolidBrush(BackColor)) g.FillRectangle(bg, ClientRectangle);
 
+        // $d021 behind the bitmap - its "00" pixels are transparent (see BackdropPicture.Image).
+        var display = new RectangleF(_panX, _panY, BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom);
+        g.FillRectangle(BrushCache.Get(EditorPalette.BackgroundColor), display);
         if (Backdrop != null)
-            g.DrawImage(Backdrop, new RectangleF(_panX, _panY, BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom));
+            g.DrawImage(Backdrop, display);
 
         if (SpritePixel == null || PaletteProvider == null || PositionProvider == null) return;
 

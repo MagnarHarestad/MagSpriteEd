@@ -202,6 +202,20 @@ internal static class Icons
         g.DrawRectangle(pen, 2, 2, 15, 15);
     });
 
+    /// <summary>$d020 swatch: the border colour as a frame around a small
+    /// $d021 "screen", so it reads differently from the drawing swatches.</summary>
+    public static Bitmap BorderSwatch(Color border, Color background) => Make(g =>
+    {
+        g.SmoothingMode = SmoothingMode.None;
+        using var b = new SolidBrush(border);
+        g.FillRectangle(b, 2, 2, 16, 16);
+        using var inner = new SolidBrush(background);
+        g.FillRectangle(inner, 6, 6, 8, 8);
+        using var pen = new Pen(Color.FromArgb(90, 90, 90), 1f);
+        g.DrawRectangle(pen, 2, 2, 15, 15);
+        g.DrawRectangle(pen, 6, 6, 7, 7);
+    });
+
     public static Bitmap Picture() => Make(g =>
     {
         using var pen = new Pen(Stroke, 1.6f);

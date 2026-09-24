@@ -76,6 +76,7 @@ public sealed class MainForm : Form
     private ToolStripButton[] _swatchButtons = null!;
     private ToolStripButton _pencilBtn = null!, _fillBtn = null!, _lineBtn = null!, _mirrorBtn = null!;
     private ToolStripButton _hiresBtn = null!;
+    private ToolStripButton _borderBtn = null!;
     // Guards _hiresBtn's CheckedChanged while SyncHiresButton programmatically
     // updates it to match whatever piece _editPiece just became - otherwise
     // that would immediately write the just-READ flag back via SetHires,
@@ -176,7 +177,8 @@ public sealed class MainForm : Form
             PixelProvider = (r, c) => _bank.IsHires(_editPiece)
                 ? (_bank.GetHiresPixel(_editPiece, r, c) != 0 ? (byte)2 : (byte)0)
                 : _bank.Get(_editPiece, r, c),
-            PaletteProvider = v => EditorPalette.ColorFor(v, _bank.IndividualColor(_editPiece))
+            PaletteProvider = v => EditorPalette.ColorFor(v, _bank.IndividualColor(_editPiece)),
+            BackgroundProvider = () => EditorPalette.BackgroundColor
         };
         _canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(12, 12, 12), Padding = new Padding(20) };
         _canvasScroll.Controls.Add(_canvas);
@@ -396,14 +398,21 @@ public sealed class MainForm : Form
         _toolbar.Items.Add(new ToolStripSeparator());
 
         // -- Palette: kept closest to the menu button, per request. Right-
-        // click MC1/MC2/Individual (not Transparent - it isn't a real VIC
-        // colour register) to repoint that slot at any of the 16 real C64
+        // click any swatch to repoint that slot at any of the 16 real C64
         // colours via EditorPalette. _swatchButtons stays indexed by the
-        // underlying colour VALUE (0=Transparent,1=MC1,2=Individual,3=MC2 -
+        // underlying colour VALUE (0=Background,1=MC1,2=Individual,3=MC2 -
         // used everywhere else, e.g. SetColor/UpdateSwatchIcons), while
         // visualOrder controls the left-to-right layout independently - MC2
         // shown before Individual, swapped from the value order, per request.
-        string[] names = { "Transparent (shortcut 0)", "MC1 (base, shortcut 1) - right-click to change colour", "Individual (shortcut 3) - right-click to change colour", "MC2 (tip, shortcut 2) - right-click to change colour" };
+        // Background is $d021: sprite pixel value 0 is transparent and shows
+        // it through, so painting "Background" is how you erase.
+        string[] names =
+        {
+            "Background $d021 (shortcut 0) - right-click to change colour",
+            "MC1 $d025 (shortcut 1) - right-click to change colour",
+            "Individual $d027+ (shortcut 3) - right-click to change this sprite's colour",
+            "MC2 $d026 (shortcut 2) - right-click to change colour"
+        };
         _swatchButtons = new ToolStripButton[4];
         for (byte v = 0; v < 4; v++)
         {
@@ -415,19 +424,32 @@ public sealed class MainForm : Form
                 Checked = v == _selectedColor
             };
             btn.Click += (_, _) => SetColor(idx);
-            if (idx > 0)
-                btn.MouseUp += (_, e) => { if (e.Button == MouseButtons.Right) ShowPalettePopup(idx, btn); };
+            btn.MouseUp += (_, e) => { if (e.Button == MouseButtons.Right) ShowPalettePopup(idx, btn); };
             _swatchButtons[v] = btn;
         }
-        byte[] visualOrder = { 0, 1, 3, 2 }; // Transparent, MC1, MC2, Individual
+        byte[] visualOrder = { 0, 1, 3, 2 }; // Background, MC1, MC2, Individual
         foreach (var v in visualOrder) _toolbar.Items.Add(_swatchButtons[v]);
+
+        // -- $d020 border: not a drawing colour, so any click opens the palette. --
+        _borderBtn = new ToolStripButton
+        {
+            DisplayStyle = ToolStripItemDisplayStyle.Image,
+            ToolTipText = "Border $d020 - click to change colour"
+        };
+        _borderBtn.MouseUp += (_, e) =>
+        {
+            if (e.Button is MouseButtons.Left or MouseButtons.Right)
+                ShowColorPopup(_borderBtn, EditorPalette.SetBorder);
+        };
+        _toolbar.Items.Add(_borderBtn);
+
         EditorPalette.Changed += () =>
         {
             UpdateSwatchIcons();
             _canvas.Invalidate();
             _positionedCanvas.Invalidate();
             _spritePoolStrip.Invalidate();
-            _constructPanel.RefreshSpriteArt();
+            _constructPanel.RefreshVicColors();
         };
         UpdateSwatchIcons();
 
@@ -638,16 +660,14 @@ public sealed class MainForm : Form
 
     private void UpdateSwatchIcons()
     {
-        Color[] colors = { Color.FromArgb(45, 45, 45), PaletteColor(1), PaletteColor(2), PaletteColor(3) };
+        Color[] colors = { EditorPalette.BackgroundColor, PaletteColor(1), PaletteColor(2), PaletteColor(3) };
         for (int i = 0; i < 4; i++) _swatchButtons[i].Image = Icons.Swatch(colors[i]);
+        _borderBtn.Image = Icons.BorderSwatch(EditorPalette.BorderColor, EditorPalette.BackgroundColor);
     }
 
     private void ShowPalettePopup(byte slot, ToolStripButton anchor)
     {
-        var popup = new Palette16Popup();
-        var screenPos = _toolbar.PointToScreen(anchor.Bounds.Location);
-        popup.Location = new Point(screenPos.X, screenPos.Y + anchor.Bounds.Height + 2);
-        popup.ColorPicked += c64Index =>
+        ShowColorPopup(anchor, c64Index =>
         {
             if (slot == 2)
             {
@@ -656,7 +676,15 @@ public sealed class MainForm : Form
                 EditorPalette.RaiseChanged();
             }
             else EditorPalette.Set(slot, c64Index);
-        };
+        });
+    }
+
+    private void ShowColorPopup(ToolStripItem anchor, Action<int> picked)
+    {
+        var popup = new Palette16Popup();
+        var screenPos = _toolbar.PointToScreen(anchor.Bounds.Location);
+        popup.Location = new Point(screenPos.X, screenPos.Y + anchor.Bounds.Height + 2);
+        popup.ColorPicked += picked;
         popup.Show(this);
     }
 
@@ -780,7 +808,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        // Colour shortcuts (0=Transparent,1=MC1,2=MC2,3=Individual - matching
+        // Colour shortcuts (0=Background,1=MC1,2=MC2,3=Individual - matching
         // the toolbar's left-to-right order, not the underlying byte value)
         // only when not typing into a text field (X/Y/Sprite#/Frame count/etc.).
         if (!e.Control && !e.Alt && IsColorShortcutKey(e.KeyCode, out byte color) && !IsTextEntryFocused())
@@ -793,11 +821,11 @@ public sealed class MainForm : Form
 
     private static bool IsColorShortcutKey(Keys key, out byte color)
     {
-        // Toolbar order is Transparent, MC1, MC2, Individual; underlying
-        // byte values are Transparent=0, MC1=1, Individual=2, MC2=3.
+        // Toolbar order is Background, MC1, MC2, Individual; underlying
+        // byte values are Background=0, MC1=1, Individual=2, MC2=3.
         switch (key)
         {
-            case Keys.D0: case Keys.NumPad0: color = 0; return true; // Transparent
+            case Keys.D0: case Keys.NumPad0: color = 0; return true; // Background
             case Keys.D1: case Keys.NumPad1: color = 1; return true; // MC1
             case Keys.D2: case Keys.NumPad2: color = 3; return true; // MC2
             case Keys.D3: case Keys.NumPad3: color = 2; return true; // Individual
@@ -1315,7 +1343,7 @@ public sealed class MainForm : Form
 
     private static string PaletteName(byte v) => v switch
     {
-        0 => "Transparent",
+        0 => "Background",
         1 => "MC1",
         2 => "Individual",
         3 => "MC2",
@@ -1469,6 +1497,12 @@ public sealed class MainForm : Form
             _bank = result.Bank;
             _backdrop?.Image.Dispose();
             _backdrop = result.Backdrop;
+            if (result.Palette is { } pal)
+                EditorPalette.SetAll(pal.Background, pal.Border, pal.Mc1, pal.Mc2);
+            else if (result.Backdrop != null)
+                // Pre-v4 project: no saved registers. The backdrop used to be
+                // drawn with its own bg byte baked in, so keep it looking the same.
+                EditorPalette.Set(0, result.Backdrop.BackgroundIndex);
             _lastProjectPath = ofd.FileName;
             _lastPrgPath = null; _lastSymPath = null;
             _undo.Clear(); _redo.Clear();
@@ -1585,7 +1619,8 @@ public sealed class MainForm : Form
             var loaded = BackdropPicture.Load(ofd.FileName);
             _backdrop?.Image.Dispose();
             _backdrop = loaded;
-            RefreshStatus("Loaded backdrop " + Path.GetFileName(ofd.FileName));
+            EditorPalette.Set(0, loaded.BackgroundIndex); // a Koala loader writes the file's bg byte to $d021
+            RefreshStatus("Loaded backdrop " + Path.GetFileName(ofd.FileName) + $" ($d021 = ${loaded.BackgroundIndex:X2})");
             RefreshBackdropViews();
         }
         catch (Exception ex)

@@ -696,7 +696,8 @@ public sealed class ConstructPanel : UserControl
         int msb = 0;
         for (int s = 0; s < 8; s++)
             if (_canvas.SpriteX[s] > 255) msb |= 1 << s;
-        _d010Label.Text = $"$d010 = %{Convert.ToString(msb, 2).PadLeft(8, '0')} (${msb:X2})";
+        _d010Label.Text = $"$d010 = %{Convert.ToString(msb, 2).PadLeft(8, '0')} (${msb:X2})   " +
+                          $"$d020 = ${EditorPalette.BorderIndex:X2}   $d021 = ${EditorPalette.BackgroundIndex:X2}";
     }
 
     /// <summary>Called by MainForm after every pixel edit so the composited
@@ -704,6 +705,14 @@ public sealed class ConstructPanel : UserControl
     /// SpriteBank instance, but this panel never repaints on its own just
     /// because the pixel editor's data changed.</summary>
     public void RefreshSpriteArt() => _canvas.Invalidate();
+
+    /// <summary>Called by MainForm when any EditorPalette register changes -
+    /// repaints with the new colours and updates the $d020/$d021 readout.</summary>
+    public void RefreshVicColors()
+    {
+        RecomputeD010Label();
+        _canvas.Invalidate();
+    }
 
     /// <summary>Read-only accessors so MainForm's positioned edit view can
     /// mirror this panel's live placement without duplicating its state.</summary>

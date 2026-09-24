@@ -28,6 +28,9 @@ internal sealed class PixelGridControl : Control
 
     public Func<int, int, byte>? PixelProvider { get; set; }
     public Func<byte, Color>? PaletteProvider { get; set; }
+    /// <summary>Colour for value-0 cells (the C64's $d021 background). When
+    /// unset they're drawn as a neutral checkerboard instead.</summary>
+    public Func<Color>? BackgroundProvider { get; set; }
 
     /// <summary>row, col, button - fired on mouse-down and on drag into a new cell.</summary>
     public event Action<int, int, MouseButtons>? CellInteract;
@@ -74,12 +77,13 @@ internal sealed class PixelGridControl : Control
         g.InterpolationMode = InterpolationMode.NearestNeighbor;
         g.PixelOffsetMode = PixelOffsetMode.Half;
 
+        Color? background = BackgroundProvider?.Invoke();
         for (int r = 0; r < Rows; r++)
         {
             for (int c = 0; c < Cols; c++)
             {
                 byte v = PixelProvider?.Invoke(r, c) ?? 0;
-                Color col = v == 0 ? CheckerColor(r, c) : (PaletteProvider?.Invoke(v) ?? Color.Magenta);
+                Color col = v == 0 ? background ?? CheckerColor(r, c) : (PaletteProvider?.Invoke(v) ?? Color.Magenta);
                 var b = BrushCache.Get(col);
                 g.FillRectangle(b, c * CellWidth, r * CellHeight, CellWidth, CellHeight);
             }

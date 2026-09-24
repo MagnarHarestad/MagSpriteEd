@@ -127,12 +127,14 @@ internal sealed class AboutDialog : Form
     private static string BuildShortcutsText() =>
         "DRAWING (Single Sprite View / Positioned View)\r\n" +
         "  Left click / drag        Paint with the selected colour\r\n" +
-        "  Right click / drag       Erase (paint Transparent)\r\n" +
-        "  0 / 1 / 2 / 3            Select colour (Transparent / MC1 / MC2 / Individual)\r\n" +
+        "  Right click / drag       Erase (paint Background)\r\n" +
+        "  0 / 1 / 2 / 3            Select colour (Background / MC1 / MC2 / Individual)\r\n" +
         "  Ctrl+Z / Ctrl+Y          Undo / redo pixel edit\r\n" +
-        "  Right-click a swatch     Change that swatch's real C64 colour - MC1/MC2 are\r\n" +
-        "                           shared by all sprites, Individual applies only to\r\n" +
-        "                           the sprite currently being edited\r\n" +
+        "  Right-click a swatch     Change that swatch's real C64 colour - Background\r\n" +
+        "                           ($d021), MC1 and MC2 are shared by all sprites,\r\n" +
+        "                           Individual applies only to the sprite being edited\r\n" +
+        "  Border swatch            Click to change the $d020 border colour Construct\r\n" +
+        "                           draws around the screen (it covers sprites, as on a C64)\r\n" +
         "\r\n" +
         "SPRITE POOL LIST (left of Single Sprite View)\r\n" +
         "  Click a thumbnail        Edit that pool piece\r\n" +

@@ -20,7 +20,7 @@ rename (still using the legacy `fire_frameN_*` labels) is also supported.
 ## Features
 
 - **Pixel editor** - Pencil, flood fill, and line tools for a 12x21
-  multicolour sprite (2 bits/pixel: transparent, MC1, Individual, MC2), with
+  multicolour sprite (2 bits/pixel: background, MC1, Individual, MC2), with
   optional left/right mirroring while you draw.
 - **Multicolour/hires per sprite** - Any pool piece can independently be
   switched to hires (1 colour, double horizontal resolution - 24x21 instead
@@ -79,14 +79,20 @@ The produced executable is `MagSpriteEd.exe`.
 - **Pool vs. Frames**: the toolbar's "Pool" count is how many distinct
   12x21 art pieces exist; "Frames" is how many animation steps the Timeline
   has. They're independent - resizing one never touches the other.
-- **Colour shortcuts**: `0`-`3` pick Transparent/MC1/MC2/Individual (matches
+- **Colour shortcuts**: `0`-`3` pick Background/MC1/MC2/Individual (matches
   the toolbar's left-to-right order); `Ctrl+Z` / `Ctrl+Y` undo/redo.
-- **Palette**: right-click the MC1/MC2/Individual swatches to preview the
-  drawing canvas in any of the 16 real C64 colours - this only affects how
-  the editor displays those slots, never the exported pixel data.
+- **Palette**: right-click a swatch to set that register to any of the 16
+  real C64 colours - Background ($d021), MC1 ($d025), MC2 ($d026), or the
+  edited sprite's Individual colour. The Border swatch sets $d020. These
+  only affect how the editor displays things (and are saved in the
+  project), never the exported pixel data.
 - **Backdrop**: File menu > "Load Backdrop Picture (.kla)..." accepts any
   Koala-format picture (2-byte load address + 8000 bytes bitmap + 1000
   bytes screen RAM + 1000 bytes colour RAM + background colour byte).
+  Loading one sets $d021 from its background byte.
+- **Construct screen**: drawn pixel-exact to a PAL C64 - the 320x200
+  display inside a 32/32/35/37-pixel $d020 border (VICE's normal 384x272
+  view), with sprites hidden behind the border as on real hardware.
 - Exported ASM assumes an assembler/build using `c6510`-style `.byte`
   directives and the label conventions noted above; adjust the including
   source to match if your build pipeline differs.

@@ -28,18 +28,26 @@ public sealed class BackdropPicture
         Color.FromArgb(120, 120, 120), Color.FromArgb(159, 224, 128), Color.FromArgb(115, 99, 213),  Color.FromArgb(159, 159, 159)
     };
 
+    /// <summary>The decoded 320x200 picture. Pixels using the "00" bit pair
+    /// are left fully transparent rather than baked to the file's background
+    /// colour - on the C64 those pixels ARE $d021, so views fill the display
+    /// area with EditorPalette.BackgroundColor first and draw this over it.</summary>
     public Bitmap Image { get; }
     public string SourcePath { get; }
     /// <summary>The raw .kla file bytes - kept so a saved project can embed
     /// the backdrop directly (it's only ~10KB) instead of just referencing
     /// a path that might not exist when the project is reopened.</summary>
     public byte[] RawBytes { get; }
+    /// <summary>The file's own background colour byte (0-15) - what a real
+    /// Koala loader would write to $d021.</summary>
+    public int BackgroundIndex { get; }
 
-    private BackdropPicture(Bitmap image, string sourcePath, byte[] rawBytes)
+    private BackdropPicture(Bitmap image, string sourcePath, byte[] rawBytes, int backgroundIndex)
     {
         Image = image;
         SourcePath = sourcePath;
         RawBytes = rawBytes;
+        BackgroundIndex = backgroundIndex;
     }
 
     public static BackdropPicture Load(string path) => Decode(File.ReadAllBytes(path), path);
@@ -81,7 +89,7 @@ public sealed class BackdropPicture
                     for (int p = 0; p < 4; p++)
                     {
                         int v = (b >> (6 - 2 * p)) & 3;
-                        Color col = v == 0 ? Palette[bg & 0x0F] : Palette[v == 1 ? c01 : v == 2 ? c10 : c];
+                        Color col = v == 0 ? Color.Transparent : Palette[v == 1 ? c01 : v == 2 ? c10 : c];
                         int x = 2 * (cx * 4 + p);
                         if (x < Width) bmp.SetPixel(x, y, col);
                         if (x + 1 < Width) bmp.SetPixel(x + 1, y, col);
@@ -89,6 +97,6 @@ public sealed class BackdropPicture
                 }
             }
         }
-        return new BackdropPicture(bmp, sourcePath, raw);
+        return new BackdropPicture(bmp, sourcePath, raw, bg & 0x0F);
     }
 }

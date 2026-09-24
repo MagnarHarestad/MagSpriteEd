@@ -19,11 +19,24 @@ public sealed class ProjectFile
     // grouped) to PieceCount/Pieces (flat pool) - see SpriteBank.FromData,
     // which migrates an older file's Frames shape on load. Construct's own
     // data (positions/SpriteSource) is unaffected and needs no migration.
-    public int Version { get; set; } = 3;
+    // Version 4: adds Palette (the shared C64 colour registers). Absent in
+    // older files - see MainForm.LoadProject's fallback.
+    public int Version { get; set; } = 4;
     public SpriteBank.SpriteBankData? Bank { get; set; }
     public ConstructPanel.ConstructPanelData? Construct { get; set; }
     public string? BackdropSourcePath { get; set; }
     public string? BackdropBase64 { get; set; }
+    public PaletteData? Palette { get; set; }
+
+    /// <summary>The shared VIC colour registers (C64 colour indexes 0-15).
+    /// Individual ($d027+) is per piece and saved with the bank instead.</summary>
+    public sealed class PaletteData
+    {
+        public int Background { get; set; } // $d021
+        public int Border { get; set; }     // $d020
+        public int Mc1 { get; set; }        // $d025
+        public int Mc2 { get; set; }        // $d026
+    }
 
     public static void Save(string path, SpriteBank bank, ConstructPanel constructPanel, BackdropPicture? backdrop)
     {
@@ -32,7 +45,14 @@ public sealed class ProjectFile
             Bank = bank.ExportData(),
             Construct = constructPanel.ExportData(),
             BackdropSourcePath = backdrop?.SourcePath,
-            BackdropBase64 = backdrop != null ? Convert.ToBase64String(backdrop.RawBytes) : null
+            BackdropBase64 = backdrop != null ? Convert.ToBase64String(backdrop.RawBytes) : null,
+            Palette = new PaletteData
+            {
+                Background = EditorPalette.BackgroundIndex,
+                Border = EditorPalette.BorderIndex,
+                Mc1 = EditorPalette.Mc1Index,
+                Mc2 = EditorPalette.Mc2Index
+            }
         };
         File.WriteAllText(path, JsonSerializer.Serialize(file));
     }
@@ -42,12 +62,14 @@ public sealed class ProjectFile
         public readonly SpriteBank Bank;
         public readonly ConstructPanel.ConstructPanelData? Construct;
         public readonly BackdropPicture? Backdrop;
+        public readonly PaletteData? Palette;
 
-        public LoadResult(SpriteBank bank, ConstructPanel.ConstructPanelData? construct, BackdropPicture? backdrop)
+        public LoadResult(SpriteBank bank, ConstructPanel.ConstructPanelData? construct, BackdropPicture? backdrop, PaletteData? palette)
         {
             Bank = bank;
             Construct = construct;
             Backdrop = backdrop;
+            Palette = palette;
         }
     }
 
@@ -64,6 +86,6 @@ public sealed class ProjectFile
             var raw = Convert.FromBase64String(file.BackdropBase64);
             backdrop = BackdropPicture.LoadFromBytes(raw, file.BackdropSourcePath ?? "(embedded)");
         }
-        return new LoadResult(bank, file.Construct, backdrop);
+        return new LoadResult(bank, file.Construct, backdrop, file.Palette);
     }
 }

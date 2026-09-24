@@ -116,12 +116,8 @@ internal sealed class SpritePoolStrip : Control
                 g.DrawString("#" + p, font, textBrush, Pad, top);
 
             int thumbTop = top + LabelHeight;
-            // Flat background rather than PixelGridControl's checkerboard -
-            // at this small a size a checker pattern reads as visual noise
-            // (almost a grid in its own right), and these are meant to be
-            // read as a plain colour silhouette, not edited directly.
-            using (var bg = new SolidBrush(Color.FromArgb(30, 30, 30)))
-                g.FillRectangle(bg, Pad, thumbTop, ThumbWidth, ThumbHeight);
+            // Flat $d021 background, as the sprite would look on the C64 screen.
+            g.FillRectangle(BrushCache.Get(EditorPalette.BackgroundColor), Pad, thumbTop, ThumbWidth, ThumbHeight);
 
             bool hires = IsHiresProvider?.Invoke(p) ?? false;
             if (hires)

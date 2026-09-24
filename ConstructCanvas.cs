@@ -24,6 +24,19 @@ internal sealed class ConstructCanvas : Control
     private const int SpriteScreenW = 24;
     private const int SpriteScreenH = 21;
 
+    // Pixel-exact PAL screen: the 320x200 display window with the border
+    // VICE shows in its "normal" border mode (384x272 visible). The display
+    // window starts at sprite coordinate X=24 / Y=50, so the visible frame's
+    // top-left is sprite X=-8 / Y=15.
+    public const int BorderLeft = 32;
+    public const int BorderRight = 32;
+    public const int BorderTop = 35;
+    public const int BorderBottom = 37;
+    public const int FrameWidth = BorderLeft + BackdropPicture.Width + BorderRight;    // 384
+    public const int FrameHeight = BorderTop + BackdropPicture.Height + BorderBottom;  // 272
+    private const int DisplaySpriteX = 24;
+    private const int DisplaySpriteY = 50;
+
     public float Zoom { get; set; } = 2f;
     public Bitmap? Backdrop { get; set; }
     /// <summary>When false, hides the per-sprite bounding-box border and
@@ -31,7 +44,7 @@ internal sealed class ConstructCanvas : Control
     /// e.g. to check how it actually reads over the backdrop.</summary>
     public bool ShowOutlines { get; set; } = true;
 
-    /// <summary>Checkerboard grid shown behind the sprites when no backdrop picture is loaded.</summary>
+    /// <summary>Faint checkerboard over the $d021 background when no backdrop picture is loaded.</summary>
     public bool ShowGrid { get; set; } = true;
 
     /// <summary>(spriteIndex, row 0..20, col 0..11) -> raw 2-bit cell value 0..3.</summary>
@@ -87,12 +100,16 @@ internal sealed class ConstructCanvas : Control
     private const float MaxZoom = 8f;
     private const float ZoomStep = 0.5f;
 
-    public void ApplyZoomedSize() => Size = new Size((int)Math.Ceiling(BackdropPicture.Width * Zoom), (int)Math.Ceiling(BackdropPicture.Height * Zoom));
+    public void ApplyZoomedSize() => Size = new Size((int)Math.Ceiling(FrameWidth * Zoom), (int)Math.Ceiling(FrameHeight * Zoom));
+
+    /// <summary>Sprite coordinate -> frame pixel (unzoomed), border included.</summary>
+    private static int FrameX(int spriteX) => spriteX - DisplaySpriteX + BorderLeft;
+    private static int FrameY(int spriteY) => spriteY - DisplaySpriteY + BorderTop;
 
     /// <summary>Public so ConstructPanel's floating per-sprite inspector can
     /// anchor itself to a sprite's current on-screen box.</summary>
     internal Rectangle SpriteRect(int spriteIndex) =>
-        new((int)((SpriteX[spriteIndex] - 24) * Zoom), (int)((SpriteY[spriteIndex] - 50) * Zoom), (int)(SpriteScreenW * Zoom), (int)(SpriteScreenH * Zoom));
+        new((int)(FrameX(SpriteX[spriteIndex]) * Zoom), (int)(FrameY(SpriteY[spriteIndex]) * Zoom), (int)(SpriteScreenW * Zoom), (int)(SpriteScreenH * Zoom));
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -101,30 +118,49 @@ internal sealed class ConstructCanvas : Control
         g.PixelOffsetMode = PixelOffsetMode.Half;
         g.SmoothingMode = SmoothingMode.None;
 
+        var display = new RectangleF(BorderLeft * Zoom, BorderTop * Zoom, BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom);
+
+        // Same layering as the VIC-II: $d021 background, then the bitmap
+        // (its "00" pixels are transparent so $d021 shows through), then
+        // sprites, then the $d020 border ON TOP of the sprites - a sprite
+        // moved into the border is hidden there, exactly as on the C64.
+        g.FillRectangle(BrushCache.Get(EditorPalette.BorderColor), ClientRectangle);
+        g.FillRectangle(BrushCache.Get(EditorPalette.BackgroundColor), display);
+
         if (Backdrop != null)
-            g.DrawImage(Backdrop, new RectangleF(0, 0, BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom));
-        else
+            g.DrawImage(Backdrop, display);
+        else if (ShowGrid)
         {
-            using var b = new SolidBrush(Color.FromArgb(24, 24, 24));
-            g.FillRectangle(b, ClientRectangle);
-            if (ShowGrid)
-            {
-                using var checker = new SolidBrush(Color.FromArgb(34, 34, 34));
-                float cell = 16 * Zoom;
-                for (int cy = 0; cy * cell < Height; cy++)
-                    for (int cx = 0; cx * cell < Width; cx++)
-                        if ((cx + cy) % 2 == 0)
-                            g.FillRectangle(checker, cx * cell, cy * cell, cell, cell);
-            }
+            // Editing aid only: a faint checker over $d021 (not replacing it),
+            // aligned to the 16-pixel character-pair grid of the display.
+            var state = g.Save();
+            g.SetClip(display);
+            var checker = BrushCache.Get(Color.FromArgb(28, 255, 255, 255));
+            float cell = 16 * Zoom;
+            for (int cy = 0; cy * cell < display.Height; cy++)
+                for (int cx = 0; cx * cell < display.Width; cx++)
+                    if ((cx + cy) % 2 == 0)
+                        g.FillRectangle(checker, display.X + cx * cell, display.Y + cy * cell, cell, cell);
+            g.Restore(state);
         }
 
-        for (int s = 0; s < 8; s++) DrawSprite(g, s);
+        for (int s = 0; s < 8; s++) DrawSpritePixels(g, s);
+
+        var border = BrushCache.Get(EditorPalette.BorderColor);
+        g.FillRectangle(border, 0, 0, Width, display.Top);
+        g.FillRectangle(border, 0, display.Bottom, Width, Height - display.Bottom);
+        g.FillRectangle(border, 0, display.Top, display.Left, display.Height);
+        g.FillRectangle(border, display.Right, display.Top, Width - display.Right, display.Height);
+
+        // Outlines and labels are an editor overlay, drawn last so a sprite
+        // hidden in the border can still be seen and grabbed.
+        for (int s = 0; s < 8; s++) DrawSpriteOverlay(g, s);
     }
 
-    private void DrawSprite(Graphics g, int spriteIndex)
+    private void DrawSpritePixels(Graphics g, int spriteIndex)
     {
-        int screenX = SpriteX[spriteIndex] - 24;
-        int screenY = SpriteY[spriteIndex] - 50;
+        int screenX = FrameX(SpriteX[spriteIndex]);
+        int screenY = FrameY(SpriteY[spriteIndex]);
 
         if (SpritePixel != null && PaletteProvider != null)
         {
@@ -162,7 +198,10 @@ internal sealed class ConstructCanvas : Control
                 }
             }
         }
+    }
 
+    private void DrawSpriteOverlay(Graphics g, int spriteIndex)
+    {
         if (!ShowOutlines) return;
 
         bool isPrimary = spriteIndex == PrimarySelected;
