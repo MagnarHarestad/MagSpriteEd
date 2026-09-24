@@ -130,7 +130,9 @@ internal sealed class AboutDialog : Form
         "  Right click / drag       Erase (paint Transparent)\r\n" +
         "  0 / 1 / 2 / 3            Select colour (Transparent / MC1 / MC2 / Individual)\r\n" +
         "  Ctrl+Z / Ctrl+Y          Undo / redo pixel edit\r\n" +
-        "  Right-click a swatch     Change that swatch's real C64 colour (MC1/MC2/Individual)\r\n" +
+        "  Right-click a swatch     Change that swatch's real C64 colour - MC1/MC2 are\r\n" +
+        "                           shared by all sprites, Individual applies only to\r\n" +
+        "                           the sprite currently being edited\r\n" +
         "\r\n" +
         "SPRITE POOL LIST (left of Single Sprite View)\r\n" +
         "  Click a thumbnail        Edit that pool piece\r\n" +
@@ -146,7 +148,10 @@ internal sealed class AboutDialog : Form
         "  Ctrl+click               Add/remove a sprite from the selection group\r\n" +
         "  Ctrl+Z / Ctrl+Y          Undo / redo position and Sprite # changes\r\n" +
         "  Mouse wheel              Zoom the composited preview in / out\r\n" +
-        "  Double-click a list cell Edit Sprite# / X / Y directly in the sprite table\r\n" +
+        "  Sprite inspector         Selecting a sprite shows a floating box next to it:\r\n" +
+        "                           < / > step its Sprite # through the pool, and\r\n" +
+        "                           X / Y set its position for the current frame\r\n" +
+        "  Menu > Show Grid         Toggles the checkerboard shown when no backdrop is loaded\r\n" +
         "\r\n" +
         "TOOLS\r\n" +
         "  Pencil / Fill / Line     Left = paint, right = erase\r\n" +
