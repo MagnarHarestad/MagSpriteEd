@@ -69,7 +69,6 @@ public sealed class MainForm : Form
     private ConstructPanel _constructPanel = null!;
     private ToolStripStatusLabel _statusLabel = null!;
     private ToolStripStatusLabel _fileLabel = null!;
-    private NumericUpDown _frameCountUpDown = null!;
     private NumericUpDown _poolCountUpDown = null!;
 
     private ToolStripButton[] _swatchButtons = null!;
@@ -514,12 +513,8 @@ public sealed class MainForm : Form
 
         _toolbar.Items.Add(new ToolStripSeparator());
 
-        // -- Frame count (Timeline length - independent of the sprite pool
-        // above; see ConstructPanel's class remarks). The frame-step
-        // buttons come first, then the "Frames" label + value field, then
-        // Apply last (per request) - it still just reads
-        // _frameCountUpDown.Value live at click time, so it works
-        // regardless of where any of these are drawn relative to it. --
+        // -- Frame steps. The "Frames" count field + Apply live in
+        // Construct's own Timeline row, next to the frame strip. --
         AddToolbarButton(Icons.FrameInsert(), "Add 1 new frame step at the current Timeline position (duplicate of it)", (_, _) => AddFrameStepAtCurrent());
         AddToolbarButton(Icons.FrameDelete(), "Delete the current animation frame step", (_, _) => DeleteCurrentFrameStep());
         AddToolbarButton(Icons.Duplicate(), "Copy this animation frame's sprites data (positions + Sprite #s) to Clipboard", (_, _) => _constructPanel.CopyCurrentFrameToClipboard());
@@ -527,17 +522,6 @@ public sealed class MainForm : Form
         {
             _constructPanel.PasteFrameFromClipboard();
             RefreshAll();
-        });
-        _toolbar.Items.Add(new ToolStripLabel("Frames") { ForeColor = Color.Gainsboro });
-        _frameCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 128, Value = 8 };
-        _toolbar.Items.Add(new ToolStripControlHost(_frameCountUpDown) { AutoSize = false, Width = 46 });
-        AddToolbarButton(Icons.Apply(), "Apply frame count (Timeline length)", (_, _) =>
-        {
-            _constructPanel.SetAnimFrameCount((int)_frameCountUpDown.Value);
-            _currentFrame = Math.Min(_currentFrame, _constructPanel.AnimFrameCount - 1);
-            SelectFrame(_currentFrame);
-            RefreshAll();
-            RefreshStatus($"Frame count set to {_constructPanel.AnimFrameCount}.");
         });
 
         _toolbar.Items.Add(new ToolStripSeparator());

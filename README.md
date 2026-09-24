@@ -77,8 +77,9 @@ The produced executable is `MagSpriteEd.exe`.
 ## Usage notes
 
 - **Pool vs. Frames**: the toolbar's "Pool" count is how many distinct
-  12x21 art pieces exist; "Frames" is how many animation steps the Timeline
-  has. They're independent - resizing one never touches the other.
+  12x21 art pieces exist; "Frames" (next to Construct's frame strip) is how
+  many animation steps the Timeline has. They're independent - resizing one
+  never touches the other.
 - **Colour shortcuts**: `0`-`3` pick Background/MC1/MC2/Individual (matches
   the toolbar's left-to-right order); `Ctrl+Z` / `Ctrl+Y` undo/redo.
 - **Palette**: right-click a swatch to set that register to any of the 16

@@ -45,6 +45,7 @@ public sealed class ConstructPanel : UserControl
 
     private Button _playButton = null!;
     private NumericUpDown _fpsUpDown = null!;
+    private NumericUpDown _frameCountUpDown = null!;
     private FrameStrip _frameScrub = null!;
     private Label _frameLabel = null!;
 
@@ -291,7 +292,7 @@ public sealed class ConstructPanel : UserControl
 
         _frameLabel = new Label { Text = "Frame 1/8", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(10, 8, 4, 0) };
         bottomRow.Controls.Add(_frameLabel);
-        _frameScrub = new FrameStrip { Maximum = 7, Width = 320, Margin = new Padding(2, 3, 12, 2) };
+        _frameScrub = new FrameStrip { Maximum = 7, Width = 320, Margin = new Padding(2, 3, 8, 2) };
         _frameScrub.ValueChanged += (_, _) =>
         {
             if (_suppressEvents) return;
@@ -301,6 +302,20 @@ public sealed class ConstructPanel : UserControl
             LoadFrameIntoCanvas();
         };
         bottomRow.Controls.Add(_frameScrub);
+
+        // Timeline length: type a count, then Apply (not live, so typing
+        // "16" doesn't briefly shrink the Timeline to 1 frame on the "1").
+        bottomRow.Controls.Add(new Label { Text = "Frames", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 8, 2, 0) });
+        _frameCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 128, Value = 8, Width = 50, Margin = new Padding(2, 3, 2, 2) };
+        bottomRow.Controls.Add(_frameCountUpDown);
+        var applyFrames = MakeTransportButton(Icons.Apply(), "Apply frame count (Timeline length)");
+        applyFrames.Margin = new Padding(1, 1, 14, 1);
+        applyFrames.Click += (_, _) =>
+        {
+            StopPlay();
+            SetAnimFrameCount((int)_frameCountUpDown.Value);
+        };
+        bottomRow.Controls.Add(applyFrames);
 
         bottomRow.Controls.Add(new Label { Text = "FPS", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 8, 2, 0) });
         _fpsUpDown = new NumericUpDown { Minimum = 1, Maximum = 50, Value = 17, Width = 50, Margin = new Padding(2, 2, 10, 2) };
@@ -574,6 +589,8 @@ public sealed class ConstructPanel : UserControl
             try { _frameScrub.Value = _frame; } finally { _suppressEvents = prev; }
         }
         _frameLabel.Text = $"Frame {_frame + 1}/{_animFrameCount}";
+        if (!_frameCountUpDown.Focused)
+            _frameCountUpDown.Value = Math.Clamp(_animFrameCount, (int)_frameCountUpDown.Minimum, (int)_frameCountUpDown.Maximum);
         _canvas.Invalidate();
         RecomputeD010Label();
         RefreshInspector();
