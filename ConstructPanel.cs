@@ -45,10 +45,11 @@ public sealed class ConstructPanel : UserControl
 
     private Button _playButton = null!;
     private NumericUpDown _fpsUpDown = null!;
-    private TrackBar _frameScrub = null!;
+    private FrameStrip _frameScrub = null!;
     private Label _frameLabel = null!;
 
     private readonly System.Windows.Forms.Timer _playTimer = new() { Interval = 180 };
+    private readonly ToolTip _tips = new();
     private int _frame;
     private CheckBox _pingPongCheck = null!;
     private int _playDir = 1;
@@ -155,7 +156,7 @@ public sealed class ConstructPanel : UserControl
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _playTimer.Dispose();
+        if (disposing) { _playTimer.Dispose(); _tips.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -253,21 +254,44 @@ public sealed class ConstructPanel : UserControl
         Controls.Add(root);
     }
 
+    // Flat dark icon buttons in the media-player order: previous, play/pause, next.
+    private static readonly Color TransportBack = Color.FromArgb(45, 45, 45);
+    private static readonly Color TransportPlaying = Color.FromArgb(70, 130, 200);
+
+    private Button MakeTransportButton(Image icon, string tooltip)
+    {
+        var btn = new Button
+        {
+            Image = icon,
+            Size = new Size(32, 26),
+            Margin = new Padding(1, 1, 1, 1),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = TransportBack,
+            TabStop = false
+        };
+        btn.FlatAppearance.BorderColor = Color.FromArgb(75, 75, 75);
+        btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(65, 65, 65);
+        btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(85, 85, 85);
+        _tips.SetToolTip(btn, tooltip);
+        return btn;
+    }
+
     private void BuildTimelineRow(FlowLayoutPanel bottomRow)
     {
-        _playButton = new Button { Text = "Play", Width = 60, Margin = new Padding(2, 2, 8, 2) };
-        _playButton.Click += (_, _) => TogglePlay();
-        var prev = new Button { Text = "<", Width = 30, Margin = new Padding(2) };
+        var prev = MakeTransportButton(Icons.Prev(), "Previous frame");
         prev.Click += (_, _) => { StopPlay(); StepFrame(-1); };
-        var next = new Button { Text = ">", Width = 30, Margin = new Padding(2) };
+        _playButton = MakeTransportButton(Icons.Play(), "Play");
+        _playButton.Click += (_, _) => TogglePlay();
+        var next = MakeTransportButton(Icons.Next(), "Next frame");
         next.Click += (_, _) => { StopPlay(); StepFrame(1); };
-        bottomRow.Controls.Add(_playButton);
+        next.Margin = new Padding(1, 1, 4, 1);
         bottomRow.Controls.Add(prev);
+        bottomRow.Controls.Add(_playButton);
         bottomRow.Controls.Add(next);
 
         _frameLabel = new Label { Text = "Frame 1/8", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(10, 8, 4, 0) };
         bottomRow.Controls.Add(_frameLabel);
-        _frameScrub = new ClickToPositionTrackBar { Minimum = 0, Maximum = 7, Width = 240, TickStyle = TickStyle.BottomRight, Margin = new Padding(2, 2, 12, 2) };
+        _frameScrub = new FrameStrip { Maximum = 7, Width = 320, Margin = new Padding(2, 3, 12, 2) };
         _frameScrub.ValueChanged += (_, _) =>
         {
             if (_suppressEvents) return;
@@ -874,11 +898,24 @@ public sealed class ConstructPanel : UserControl
     // ---------------------------------------------------------------------
     private void TogglePlay()
     {
-        if (_playTimer.Enabled) StopPlay();
-        else { _playTimer.Interval = Math.Max(20, (int)(1000 / _fpsUpDown.Value)); _playTimer.Start(); _playButton.Text = "Stop"; }
+        if (_playTimer.Enabled) { StopPlay(); return; }
+        _playTimer.Interval = Math.Max(20, (int)(1000 / _fpsUpDown.Value));
+        _playTimer.Start();
+        SetPlayButtonState(playing: true);
     }
 
-    private void StopPlay() { _playTimer.Stop(); _playButton.Text = "Play"; }
+    private void StopPlay()
+    {
+        _playTimer.Stop();
+        SetPlayButtonState(playing: false);
+    }
+
+    private void SetPlayButtonState(bool playing)
+    {
+        _playButton.Image = playing ? Icons.Stop() : Icons.Play(); // Icons.Stop draws a pause glyph
+        _playButton.BackColor = playing ? TransportPlaying : TransportBack;
+        _tips.SetToolTip(_playButton, playing ? "Pause" : "Play");
+    }
 
     // ---------------------------------------------------------------------
     // Export
@@ -1044,39 +1081,5 @@ public sealed class ConstructPanel : UserControl
             $"(pool has {bank.PieceCount} raw slots total) to:\n{sfd.FileName}\n\n" +
             "Build with FIRE_COMPOSITION_TABLES defined (c6510 -d FIRE_COMPOSITION_TABLES ...) to use it.",
             "Exported", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
-}
-
-/// <summary>
-/// A plain TrackBar's click-on-track behaviour pages by LargeChange toward
-/// the click point instead of jumping straight to it - fine for a long
-/// scrollbar-style range, wrong for a short per-frame scrubber where a
-/// deliberate click should land on that exact frame. Setting Value to the
-/// click's target position ourselves, before the native control processes
-/// WM_LBUTTONDOWN, makes it see the down-click as landing on the thumb
-/// (which we just moved there) and go straight into its normal drag-track
-/// mode instead of paging.
-/// </summary>
-internal sealed class ClickToPositionTrackBar : TrackBar
-{
-    private const int WM_LBUTTONDOWN = 0x0201;
-
-    protected override void WndProc(ref Message m)
-    {
-        if (m.Msg == WM_LBUTTONDOWN && Orientation == Orientation.Horizontal && Maximum > Minimum)
-        {
-            int x = unchecked((short)(m.LParam.ToInt32() & 0xFFFF));
-            Value = ValueFromX(x);
-        }
-        base.WndProc(ref m);
-    }
-
-    private int ValueFromX(int x)
-    {
-        const int thumbHalf = 8; // approx half-width of the native track thumb
-        int usable = Math.Max(1, Width - thumbHalf * 2);
-        double ratio = (double)(x - thumbHalf) / usable;
-        ratio = Math.Max(0, Math.Min(1, ratio));
-        return Minimum + (int)Math.Round(ratio * (Maximum - Minimum));
     }
 }
