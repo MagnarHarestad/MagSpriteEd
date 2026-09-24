@@ -92,13 +92,6 @@ public sealed class MainForm : Form
 
     private BackdropPicture? _backdrop;
 
-    // Shown once per session the first time EnsureExclusiveSlot's
-    // AllocateFreeSlot has to grow the pool (no free piece left anywhere) -
-    // a status-bar line alone is easy to miss while actively drawing, and
-    // this can otherwise silently ratchet the pool size up one at a time
-    // over a long editing session with no clear signal why.
-    private bool _warnedBankGrowth;
-
     private static readonly byte[] IndividualPaletteIndex = { 8, 10, 8, 10, 10, 8, 10, 8 };
 
     public MainForm()
@@ -1165,17 +1158,6 @@ public sealed class MainForm : Form
         _bank.Resize(_bank.PieceCount + 1);
         _spritePoolStrip.SetPieceCount(_bank.PieceCount);
         RefreshStatus($"Sprite pool grew to {_bank.PieceCount} piece(s) to make room for a forked sprite - every existing piece was already in use.");
-        if (!_warnedBankGrowth)
-        {
-            _warnedBankGrowth = true;
-            MessageBox.Show(this,
-                "The sprite pool just grew by one piece because every existing piece was already in use " +
-                "(this happens automatically when editing a sprite that's shared with another frame/sprite - see " +
-                "the status bar). If you keep drawing this can repeat and quietly grow the pool size a lot - " +
-                "use the \"Pool\" count + Apply in the toolbar to trim it back down when you're done.\n\n" +
-                "This message only shows once per session; watch the status bar for later occurrences.",
-                "Sprite pool grew", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
         return newPiece;
     }
 
