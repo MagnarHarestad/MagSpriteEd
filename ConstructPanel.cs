@@ -32,14 +32,17 @@ public sealed class ConstructPanel : UserControl
     private readonly Func<BackdropPicture?> _backdropProvider;
 
     private ConstructCanvas _canvas = null!;
-    private DoubleBufferedListView _list = null!;
     private Label _d010Label = null!;
-    // In-place ListView cell editor for the Sprite#/X/Y columns - a single
-    // NumericUpDown reused across cells/columns rather than one permanent
-    // editor per column, since only one cell is ever being edited at a
-    // time. See BeginCellEdit/CommitCellEdit.
-    private NumericUpDown _cellEditor = null!;
-    private int _editingRow = -1, _editingCol = -1;
+
+    // Floating per-sprite inspector - replaces the old separate Sprites
+    // table. A single instance, repositioned to hover next to whichever
+    // hardware sprite is PrimarySelected (see RefreshInspector), instead of
+    // a fixed-position panel listing all 8 at once.
+    private FlowLayoutPanel _inspector = null!;
+    private Button _pieceLeftBtn = null!, _pieceRightBtn = null!;
+    private Label _pieceLabel = null!;
+    private NumericUpDown _xUpDown = null!, _yUpDown = null!;
+
     private Button _playButton = null!;
     private NumericUpDown _fpsUpDown = null!;
     private TrackBar _frameScrub = null!;
@@ -50,11 +53,12 @@ public sealed class ConstructPanel : UserControl
     private CheckBox _pingPongCheck = null!;
     private int _playDir = 1;
 
-    // Guards against event re-entrancy: RefreshList() selects a row, which
-    // fires ListView.SelectedIndexChanged - a feedback loop that a fast
-    // mouse-drag (many SpriteMoved events in quick succession) reliably
-    // turned into a NullReferenceException inside the ListView. Every
-    // handler that only reacts to a programmatic update checks this first.
+    // Guards against event re-entrancy when a control's Value/Selection is
+    // set PROGRAMMATICALLY (e.g. RefreshInspector populating the X/Y
+    // NumericUpDowns, or LoadFrameIntoCanvas moving the frame scrubber) -
+    // without this, that own change would immediately fire the control's
+    // ValueChanged/etc. handler right back into the same state update.
+    // Every handler that only reacts to a programmatic update checks this first.
     private bool _suppressEvents;
 
     // Per-frame keyframed state: [frame][sprite]. Position and sprite
@@ -154,7 +158,7 @@ public sealed class ConstructPanel : UserControl
     private void BuildUi()
     {
         // One column: the composited canvas fills the top, everything else
-        // (Timeline / Sprites+VIC / Actions) sits in one row along the
+        // (Timeline / Sprites+VIC) sits in one row along the
         // bottom instead of a narrow sidebar - see class remarks. That
         // sidebar's Backdrop panel is gone entirely: "Load Backdrop" now
         // lives on MainForm's own Menu, sprite-outline visibility is a
@@ -185,11 +189,13 @@ public sealed class ConstructPanel : UserControl
                 var bank = _bankProvider();
                 int source = _spriteSource[_frame][spriteIdx];
                 return source >= 0 && source < bank.PieceCount && bank.IsHires(source);
-            }
+            },
+            SpriteLabel = spriteIdx => $"S{spriteIdx} - #{_spriteSource[_frame][spriteIdx]}"
         };
         _canvas.ApplyZoomedSize();
-        _canvas.SelectionChanged += () => { SyncListSelection(); SelectedSpriteSourceChanged?.Invoke(); };
+        _canvas.SelectionChanged += () => { RefreshInspector(); SelectedSpriteSourceChanged?.Invoke(); };
         _canvas.SpriteMoved += CommitCanvasPositionsToCurrentFrame;
+        _canvas.ZoomChanged += RefreshInspector;
         // These are the base Control.MouseDown/KeyDown events (raised via
         // base.OnMouseDown/base.OnKeyDown as the FIRST line of ConstructCanvas's
         // own overrides), so they fire before any position is actually
@@ -209,90 +215,45 @@ public sealed class ConstructPanel : UserControl
         _canvas.Location = new Point(12, 12);
         canvasScroll.Controls.Add(_canvas);
 
+        BuildInspector();
+        _canvas.Controls.Add(_inspector);
+
+        // Bottom strip is now just the Timeline - the old "Sprites (0-7)"
+        // table is gone, replaced by _inspector floating over whichever
+        // sprite is selected (see BuildInspector/RefreshInspector), and the
+        // "Actions" group was removed earlier. One flat row instead of
+        // boxed GroupBoxes, so it reads as a single toolbar-like strip.
         var bottomRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
             AutoSize = true,
             WrapContents = true,
-            Padding = new Padding(8),
+            Padding = new Padding(8, 6, 8, 6),
             BackColor = Color.FromArgb(22, 22, 22)
         };
-
-        bottomRow.Controls.Add(MakeGroup("Timeline", BuildTimelineRow()));
-
-        _list = new DoubleBufferedListView { View = View.Details, FullRowSelect = true, MultiSelect = true, GridLines = true, HideSelection = false, Width = 258, Height = 190, BackColor = Color.FromArgb(30, 30, 30), ForeColor = Color.Gainsboro };
-        _list.Columns.Add("#", 24);
-        _list.Columns.Add("Sprite#", 52);
-        _list.Columns.Add("X", 40);
-        _list.Columns.Add("Y", 40);
-        _list.Columns.Add("MSB", 36);
-        _list.SelectedIndexChanged += (_, _) =>
-        {
-            if (_suppressEvents) return;
-            _canvas.SelectedSprites.Clear();
-            foreach (int idx in _list.SelectedIndices) _canvas.SelectedSprites.Add(idx);
-            _canvas.PrimarySelected = _list.SelectedIndices.Count > 0 ? _list.SelectedIndices[_list.SelectedIndices.Count - 1] : -1;
-            _canvas.Invalidate();
-        };
-        _list.MouseDoubleClick += List_MouseDoubleClick;
-        _cellEditor = new NumericUpDown
-        {
-            Visible = false,
-            BackColor = Color.FromArgb(45, 45, 45),
-            ForeColor = Color.Gainsboro,
-            BorderStyle = BorderStyle.FixedSingle,
-            TextAlign = HorizontalAlignment.Center
-        };
-        _cellEditor.KeyDown += CellEditor_KeyDown;
-        _cellEditor.Leave += (_, _) => CommitCellEdit();
-        _list.Controls.Add(_cellEditor);
-
-        // VIC register readout folded into this same group (no more
-        // separate "VIC registers" box) - just stacked below the list.
-        _d010Label = new Label { Text = "$d010 = %00000000 ($00)", AutoSize = true, ForeColor = Color.Gainsboro };
-        bottomRow.Controls.Add(MakeGroup("Sprites (0-7) - Ctrl/Shift-click to group, dbl-click to edit", Stack(_list, _d010Label)));
-
-        bottomRow.Controls.Add(MakeGroup("Actions", BuildActionsRow()));
+        BuildTimelineRow(bottomRow);
 
         root.Controls.Add(canvasScroll, 0, 0);
         root.Controls.Add(bottomRow, 0, 1);
         Controls.Add(root);
     }
 
-    private Control BuildTimelineRow()
+    private void BuildTimelineRow(FlowLayoutPanel bottomRow)
     {
-        _playButton = new Button { Text = "Play", Width = 60, Margin = new Padding(2) };
+        _playButton = new Button { Text = "Play", Width = 60, Margin = new Padding(2, 2, 8, 2) };
         _playButton.Click += (_, _) => TogglePlay();
         var prev = new Button { Text = "<", Width = 30, Margin = new Padding(2) };
         prev.Click += (_, _) => { StopPlay(); StepFrame(-1); };
         var next = new Button { Text = ">", Width = 30, Margin = new Padding(2) };
         next.Click += (_, _) => { StopPlay(); StepFrame(1); };
-        var playRow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false };
-        playRow.Controls.Add(_playButton); playRow.Controls.Add(prev); playRow.Controls.Add(next);
-        playRow.Controls.Add(new Label { Text = "FPS", AutoSize = true, Padding = new Padding(6, 6, 2, 0) });
-        _fpsUpDown = new NumericUpDown { Minimum = 1, Maximum = 50, Value = 17, Width = 50 };
-        _fpsUpDown.ValueChanged += (_, _) => _playTimer.Interval = Math.Max(20, (int)(1000 / _fpsUpDown.Value));
-        playRow.Controls.Add(_fpsUpDown);
-        _pingPongCheck = new CheckBox
-        {
-            Text = "Ping-pong",
-            ForeColor = Color.Gainsboro,
-            AutoSize = true,
-            Padding = new Padding(8, 4, 0, 0),
-            // Also written into the "Export Optimized ASM" output as
-            // var magspriteed_opt_pingpong - Fire.s's Fire_Frame reads that
-            // to pick ping-pong vs. simple forward-wrap playback on the C64
-            // itself (see BuildOptimizedAsmExport), so this one checkbox
-            // controls both the editor's own preview loop and the shipped
-            // demo's animation.
-        };
-        _playDir = 1;
-        playRow.Controls.Add(_pingPongCheck);
-        playRow.Size = playRow.PreferredSize;
+        bottomRow.Controls.Add(_playButton);
+        bottomRow.Controls.Add(prev);
+        bottomRow.Controls.Add(next);
 
-        _frameLabel = new Label { Text = "Frame 1/8", AutoSize = true, ForeColor = Color.Gainsboro };
-        _frameScrub = new ClickToPositionTrackBar { Minimum = 0, Maximum = 7, Width = 250, TickStyle = TickStyle.BottomRight };
+        _frameLabel = new Label { Text = "Frame 1/8", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(10, 8, 4, 0) };
+        bottomRow.Controls.Add(_frameLabel);
+        _frameScrub = new ClickToPositionTrackBar { Minimum = 0, Maximum = 7, Width = 240, TickStyle = TickStyle.BottomRight, Margin = new Padding(2, 2, 12, 2) };
         _frameScrub.ValueChanged += (_, _) =>
         {
             if (_suppressEvents) return;
@@ -301,36 +262,138 @@ public sealed class ConstructPanel : UserControl
             _frame = _frameScrub.Value;
             LoadFrameIntoCanvas();
         };
+        bottomRow.Controls.Add(_frameScrub);
 
-        return Stack(playRow, _frameLabel, _frameScrub);
+        bottomRow.Controls.Add(new Label { Text = "FPS", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 8, 2, 0) });
+        _fpsUpDown = new NumericUpDown { Minimum = 1, Maximum = 50, Value = 17, Width = 50, Margin = new Padding(2, 2, 10, 2) };
+        _fpsUpDown.ValueChanged += (_, _) => _playTimer.Interval = Math.Max(20, (int)(1000 / _fpsUpDown.Value));
+        bottomRow.Controls.Add(_fpsUpDown);
+
+        _pingPongCheck = new CheckBox
+        {
+            Text = "Ping-pong",
+            ForeColor = Color.Gainsboro,
+            AutoSize = true,
+            Margin = new Padding(2, 6, 16, 2),
+            // Also written into the "Export Optimized ASM" output as
+            // var magspriteed_opt_pingpong - Fire.s's Fire_Frame reads that
+            // to pick ping-pong vs. simple forward-wrap playback on the C64
+            // itself (see BuildOptimizedAsmExport), so this one checkbox
+            // controls both the editor's own preview loop and the shipped
+            // demo's animation.
+        };
+        _playDir = 1;
+        bottomRow.Controls.Add(_pingPongCheck);
+
+        _d010Label = new Label { Text = "$d010 = %00000000 ($00)", AutoSize = true, ForeColor = Color.FromArgb(140, 140, 140), Margin = new Padding(2, 8, 2, 0) };
+        bottomRow.Controls.Add(_d010Label);
     }
 
-    private Control BuildActionsRow()
+    /// <summary>Builds the floating panel that hovers next to whichever
+    /// hardware sprite is currently selected (see RefreshInspector) - the
+    /// direct replacement for the old always-visible Sprites table: lets
+    /// you step its Sprite # and edit X/Y right where the sprite is, rather
+    /// than in a fixed list elsewhere on screen.</summary>
+    private void BuildInspector()
     {
-        var copyNext = new Button { Text = "Copy positions -> next frame", AutoSize = true, Margin = new Padding(2) };
-        copyNext.Click += (_, _) => CopyPositionsToNextFrame();
-        var copyAll = new Button { Text = "Copy positions -> all frames", AutoSize = true, Margin = new Padding(2) };
-        copyAll.Click += (_, _) => CopyPositionsToAllFrames();
-        var resetBtn = new Button { Text = "Reset all frames to defaults", AutoSize = true, Margin = new Padding(2) };
-        resetBtn.Click += (_, _) => { ResetAllFramesToDefaults(); LoadFrameIntoCanvas(); };
-        return Stack(copyNext, copyAll, resetBtn);
+        _inspector = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            BackColor = Color.FromArgb(38, 38, 38),
+            BorderStyle = BorderStyle.FixedSingle,
+            Padding = new Padding(4),
+            Visible = false
+        };
+
+        _pieceLeftBtn = new Button { Text = "<", Width = 22, Height = 22, Margin = new Padding(1, 1, 1, 1) };
+        _pieceLeftBtn.Click += (_, _) => StepPiece(-1);
+        _pieceLabel = new Label { AutoSize = true, ForeColor = Color.Gainsboro, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(2, 5, 2, 0) };
+        _pieceRightBtn = new Button { Text = ">", Width = 22, Height = 22, Margin = new Padding(1, 1, 6, 1) };
+        _pieceRightBtn.Click += (_, _) => StepPiece(1);
+
+        var xLabel = new Label { Text = "X", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 5, 2, 0) };
+        _xUpDown = new NumericUpDown { Minimum = 0, Maximum = 511, Width = 46, Margin = new Padding(0, 1, 8, 1) };
+        _xUpDown.Enter += (_, _) => PushPositionUndo();
+        _xUpDown.ValueChanged += (_, _) =>
+        {
+            if (_suppressEvents) return;
+            int s = _canvas.PrimarySelected;
+            if (s < 0) return;
+            _canvas.SpriteX[s] = (int)_xUpDown.Value;
+            _canvas.Invalidate();
+            CommitCanvasPositionsToCurrentFrame();
+        };
+
+        var yLabel = new Label { Text = "Y", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 5, 2, 0) };
+        _yUpDown = new NumericUpDown { Minimum = 0, Maximum = 255, Width = 46, Margin = new Padding(0, 1, 1, 1) };
+        _yUpDown.Enter += (_, _) => PushPositionUndo();
+        _yUpDown.ValueChanged += (_, _) =>
+        {
+            if (_suppressEvents) return;
+            int s = _canvas.PrimarySelected;
+            if (s < 0) return;
+            _canvas.SpriteY[s] = (int)_yUpDown.Value;
+            _canvas.Invalidate();
+            CommitCanvasPositionsToCurrentFrame();
+        };
+
+        _inspector.Controls.Add(_pieceLeftBtn);
+        _inspector.Controls.Add(_pieceLabel);
+        _inspector.Controls.Add(_pieceRightBtn);
+        _inspector.Controls.Add(xLabel);
+        _inspector.Controls.Add(_xUpDown);
+        _inspector.Controls.Add(yLabel);
+        _inspector.Controls.Add(_yUpDown);
     }
 
-    private static Control Stack(params Control[] controls)
+    /// <summary>Steps the primary-selected hardware sprite's Sprite # (its
+    /// raw pool piece index, wrapping) - the inspector's "&lt; Piece N &gt;"
+    /// control.</summary>
+    private void StepPiece(int delta)
     {
-        var flow = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
-        foreach (var c in controls) { c.Margin = new Padding(2); flow.Controls.Add(c); }
-        flow.Size = flow.PreferredSize;
-        return flow;
+        int s = _canvas.PrimarySelected;
+        if (s < 0) return;
+        EnsureArraysAllocated();
+        int count = Math.Max(1, _bankProvider().PieceCount);
+        PushPositionUndo();
+        int cur = _spriteSource[_frame][s];
+        _spriteSource[_frame][s] = ((cur + delta) % count + count) % count;
+        _canvas.Invalidate();
+        RefreshInspector();
+        SelectedSpriteSourceChanged?.Invoke();
     }
 
-    private static GroupBox MakeGroup(string title, Control content)
+    /// <summary>Repositions and repopulates the floating inspector to track
+    /// whichever hardware sprite is PrimarySelected (hidden when nothing is
+    /// selected) - called on selection change, frame change, drag/nudge,
+    /// zoom, and a Sprite # step.</summary>
+    private void RefreshInspector()
     {
-        var gb = new GroupBox { Text = title, ForeColor = Color.Gainsboro, AutoSize = true, Width = 266, Padding = new Padding(6) };
-        content.Location = new Point(8, 20);
-        gb.Controls.Add(content);
-        gb.Height = content.Height + 34;
-        return gb;
+        int s = _canvas.PrimarySelected;
+        if (s < 0 || s >= 8) { _inspector.Visible = false; return; }
+        EnsureArraysAllocated();
+
+        bool prev = _suppressEvents;
+        _suppressEvents = true;
+        try
+        {
+            _pieceLabel.Text = "Piece " + _spriteSource[_frame][s];
+            _xUpDown.Value = Math.Max(_xUpDown.Minimum, Math.Min(_xUpDown.Maximum, _canvas.SpriteX[s]));
+            _yUpDown.Value = Math.Max(_yUpDown.Minimum, Math.Min(_yUpDown.Maximum, _canvas.SpriteY[s]));
+        }
+        finally { _suppressEvents = prev; }
+
+        var rect = _canvas.SpriteRect(s);
+        _inspector.Size = _inspector.PreferredSize;
+        int x = rect.Right + 6;
+        if (x + _inspector.Width > _canvas.Width) x = Math.Max(0, rect.Left - _inspector.Width - 6);
+        int y = Math.Max(0, Math.Min(rect.Top - 6, _canvas.Height - _inspector.Height));
+        _inspector.Location = new Point(x, y);
+        _inspector.Visible = true;
+        _inspector.BringToFront();
     }
 
     // ---------------------------------------------------------------------
@@ -468,7 +531,8 @@ public sealed class ConstructPanel : UserControl
         }
         _frameLabel.Text = $"Frame {_frame + 1}/{_animFrameCount}";
         _canvas.Invalidate();
-        RefreshList();
+        RecomputeD010Label();
+        RefreshInspector();
         FrameChanged?.Invoke(_frame);
         SelectedSpriteSourceChanged?.Invoke();
     }
@@ -483,11 +547,10 @@ public sealed class ConstructPanel : UserControl
         LoadFrameIntoCanvas();
     }
 
-    /// <summary>Re-syncs the canvas/list/dedup-dependent UI after the
-    /// bank's PieceCount changes elsewhere (grow/shrink, undo, a fresh
-    /// pixel edit) - the Timeline's own length is untouched, this only
-    /// repaints and refreshes Sprite # dropdowns/labels that depend on the
-    /// pool's current dedup map.</summary>
+    /// <summary>Re-syncs the canvas/inspector after the bank's PieceCount
+    /// changes elsewhere (grow/shrink, undo, a fresh pixel edit) - the
+    /// Timeline's own length is untouched, this only repaints and refreshes
+    /// the on-canvas Sprite # labels/inspector.</summary>
     public void RefreshAfterPoolChange() => LoadFrameIntoCanvas();
 
     /// <summary>Fires whenever the active frame changes, for whatever
@@ -501,13 +564,8 @@ public sealed class ConstructPanel : UserControl
         EnsureArraysAllocated();
         Array.Copy(_canvas.SpriteX, _posX[_frame], 8);
         Array.Copy(_canvas.SpriteY, _posY[_frame], 8);
-        // Update only the row(s) that actually moved, in place, instead of
-        // RefreshList()'s full Clear()+rebuild - this runs on every mouse-move
-        // during a drag (now possibly for several sprites at once, dragged as
-        // a group), and rebuilding the whole ListView that often is what made
-        // it flicker.
-        foreach (var s in _canvas.SelectedSprites) UpdateListRow(s);
         RecomputeD010Label();
+        RefreshInspector();
     }
 
     // ---------------------------------------------------------------------
@@ -559,15 +617,6 @@ public sealed class ConstructPanel : UserControl
         LoadFrameIntoCanvas();
     }
 
-    private void CopyPositionsToNextFrame()
-    {
-        EnsureArraysAllocated();
-        int next = (_frame + 1) % _animFrameCount;
-        Array.Copy(_posX[_frame], _posX[next], 8);
-        Array.Copy(_posY[_frame], _posY[next], 8);
-        if (next == _frame) return;
-        MessageBox.Show(this, $"Copied frame {_frame + 1}'s positions to frame {next + 1}.", "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
 
     /// <summary>Snapshots the current animation frame's FULL per-sprite
     /// state - position AND Sprite # source, for all 8 hardware sprites -
@@ -591,18 +640,6 @@ public sealed class ConstructPanel : UserControl
         Array.Copy(y, _posY[_frame], 8);
         Array.Copy(source, _spriteSource[_frame], 8);
         LoadFrameIntoCanvas();
-    }
-
-    private void CopyPositionsToAllFrames()
-    {
-        EnsureArraysAllocated();
-        for (int f = 0; f < _animFrameCount; f++)
-        {
-            if (f == _frame) continue;
-            Array.Copy(_posX[_frame], _posX[f], 8);
-            Array.Copy(_posY[_frame], _posY[f], 8);
-        }
-        MessageBox.Show(this, $"Copied frame {_frame + 1}'s positions to all {_animFrameCount} frames (no more movement between frames).", "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     /// <summary>Inserts a new animation frame (Timeline step) at index `at`,
@@ -647,196 +684,12 @@ public sealed class ConstructPanel : UserControl
         LoadFrameIntoCanvas();
     }
 
-    // ---------------------------------------------------------------------
-    // Selection / table sync
-    // ---------------------------------------------------------------------
-    private void SyncListSelection()
-    {
-        bool prev = _suppressEvents;
-        _suppressEvents = true;
-        try
-        {
-            _list.SelectedIndices.Clear();
-            foreach (var s in _canvas.SelectedSprites)
-                if (s >= 0 && s < _list.Items.Count) _list.Items[s].Selected = true;
-            if (_canvas.PrimarySelected >= 0 && _canvas.PrimarySelected < _list.Items.Count)
-                _list.Items[_canvas.PrimarySelected].EnsureVisible();
-        }
-        finally { _suppressEvents = prev; }
-    }
-
-    /// <summary>The bank's current deduplication map - identical 12x21
-    /// content at different piece indices collapses to one canonical
-    /// index, so the UI's Sprite # is dense and jump-free, and reused
-    /// content (e.g. a shared "cleared" sprite) always shows the same
-    /// number. Recomputed on demand rather than cached, since it depends
-    /// on live pixel content that can change from any edit.</summary>
-    private SpriteBank.DedupMap CurrentDedupMap() => _bankProvider().BuildDedupMap();
-
-    private void UpdateListRow(int s)
-    {
-        if (s < 0 || s >= _list.Items.Count) return;
-        int x = _canvas.SpriteX[s];
-        int y = _canvas.SpriteY[s];
-        var dedup = CurrentDedupMap();
-        int raw = _spriteSource[_frame][s];
-        int canonical = raw >= 0 && raw < dedup.SlotToCanonical.Length ? dedup.SlotToCanonical[raw] : 0;
-        var item = _list.Items[s];
-        item.SubItems[1].Text = canonical.ToString();
-        item.SubItems[2].Text = x.ToString();
-        item.SubItems[3].Text = y.ToString();
-        item.SubItems[4].Text = x > 255 ? "1" : "0";
-    }
-
     private void RecomputeD010Label()
     {
         int msb = 0;
         for (int s = 0; s < 8; s++)
             if (_canvas.SpriteX[s] > 255) msb |= 1 << s;
         _d010Label.Text = $"$d010 = %{Convert.ToString(msb, 2).PadLeft(8, '0')} (${msb:X2})";
-    }
-
-    private void RefreshList()
-    {
-        bool prev = _suppressEvents;
-        _suppressEvents = true;
-        try
-        {
-            _list.BeginUpdate();
-            _list.Items.Clear();
-            var dedup = CurrentDedupMap();
-            for (int s = 0; s < 8; s++)
-            {
-                int raw = _spriteSource[_frame][s];
-                int canonical = raw >= 0 && raw < dedup.SlotToCanonical.Length ? dedup.SlotToCanonical[raw] : 0;
-                var item = new ListViewItem(new[]
-                {
-                    s.ToString(), canonical.ToString(),
-                    _canvas.SpriteX[s].ToString(), _canvas.SpriteY[s].ToString(), _canvas.SpriteX[s] > 255 ? "1" : "0"
-                });
-                if (_canvas.SelectedSprites.Contains(s)) item.Selected = true;
-                _list.Items.Add(item);
-            }
-            _list.EndUpdate();
-            RecomputeD010Label();
-        }
-        finally { _suppressEvents = prev; }
-    }
-
-    // ---------------------------------------------------------------------
-    // In-place cell editing for the Sprite#/X/Y columns - replaces the old
-    // separate "Selected sprite" X/Y/Sprite# panel. ListView has no built-in
-    // per-cell editor (only the first column supports LabelEdit), so
-    // _cellEditor is one NumericUpDown reused across cells: shown and
-    // repositioned over whichever subitem was double-clicked, hidden again
-    // on commit/cancel.
-    // ---------------------------------------------------------------------
-    private void List_MouseDoubleClick(object? sender, MouseEventArgs e)
-    {
-        var hit = _list.HitTest(e.Location);
-        if (hit.Item == null || hit.SubItem == null) return;
-        int col = -1;
-        for (int i = 0; i < hit.Item.SubItems.Count; i++)
-            if (hit.Item.SubItems[i] == hit.SubItem) { col = i; break; }
-        if (col is not (1 or 2 or 3)) return; // only Sprite#/X/Y are editable - not "#" or "MSB"
-        BeginCellEdit(hit.Item.Index, col, hit.SubItem.Bounds);
-    }
-
-    private void BeginCellEdit(int row, int col, Rectangle bounds)
-    {
-        EnsureArraysAllocated();
-        // One undo snapshot per edit session (starting the edit), not per
-        // keystroke/spinner-tick - matches how the old X/Y/Sprite# panel's
-        // NumericUpDown.Enter handlers pushed undo.
-        PushPositionUndo();
-
-        int value;
-        switch (col)
-        {
-            case 1: // Sprite# - shown/edited as the same CANONICAL (deduplicated)
-                    // index CurrentDedupMap()/UpdateListRow use, not the raw piece.
-                var dedup = CurrentDedupMap();
-                int raw = _spriteSource[_frame][row];
-                _cellEditor.Minimum = 0;
-                _cellEditor.Maximum = Math.Max(0, dedup.CanonicalCount - 1);
-                value = raw >= 0 && raw < dedup.SlotToCanonical.Length ? dedup.SlotToCanonical[raw] : 0;
-                break;
-            case 2: // X
-                _cellEditor.Minimum = 0;
-                _cellEditor.Maximum = 511;
-                value = _canvas.SpriteX[row];
-                break;
-            default: // Y
-                _cellEditor.Minimum = 0;
-                _cellEditor.Maximum = 255;
-                value = _canvas.SpriteY[row];
-                break;
-        }
-
-        _editingRow = row;
-        _editingCol = col;
-        _cellEditor.Bounds = bounds;
-        bool prev = _suppressEvents;
-        _suppressEvents = true;
-        try { _cellEditor.Value = Math.Max(_cellEditor.Minimum, Math.Min(_cellEditor.Maximum, value)); }
-        finally { _suppressEvents = prev; }
-        _cellEditor.Visible = true;
-        _cellEditor.BringToFront();
-        _cellEditor.Focus();
-        _cellEditor.Select(0, 100);
-    }
-
-    private void CommitCellEdit()
-    {
-        if (_editingRow < 0) return;
-        int row = _editingRow, col = _editingCol;
-        _editingRow = -1;
-        _editingCol = -1;
-        _cellEditor.Visible = false;
-        int value = (int)_cellEditor.Value;
-
-        switch (col)
-        {
-            case 1:
-                var dedup = CurrentDedupMap();
-                _spriteSource[_frame][row] = value < dedup.CanonicalCount ? dedup.CanonicalToSlot[value] : 0;
-                UpdateListRow(row);
-                _canvas.Invalidate();
-                if (row == _canvas.PrimarySelected) SelectedSpriteSourceChanged?.Invoke();
-                break;
-            case 2:
-                _canvas.SpriteX[row] = value;
-                UpdateListRow(row);
-                _canvas.Invalidate();
-                CommitCanvasPositionsToCurrentFrame();
-                break;
-            case 3:
-                _canvas.SpriteY[row] = value;
-                UpdateListRow(row);
-                _canvas.Invalidate();
-                CommitCanvasPositionsToCurrentFrame();
-                break;
-        }
-    }
-
-    private void CellEditor_KeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.KeyCode == Keys.Enter)
-        {
-            e.Handled = true;
-            e.SuppressKeyPress = true;
-            CommitCellEdit();
-            _list.Focus();
-        }
-        else if (e.KeyCode == Keys.Escape)
-        {
-            e.Handled = true;
-            e.SuppressKeyPress = true;
-            _editingRow = -1;
-            _editingCol = -1;
-            _cellEditor.Visible = false;
-            _list.Focus();
-        }
     }
 
     /// <summary>Called by MainForm after every pixel edit so the composited
@@ -876,10 +729,12 @@ public sealed class ConstructPanel : UserControl
         _spriteSource[frame][spriteIndex] = piece;
         if (frame == _frame)
         {
-            UpdateListRow(spriteIndex);
             _canvas.Invalidate();
             if (spriteIndex == _canvas.PrimarySelected)
+            {
+                RefreshInspector();
                 SelectedSpriteSourceChanged?.Invoke();
+            }
         }
     }
 
@@ -1157,20 +1012,6 @@ public sealed class ConstructPanel : UserControl
             "Build with FIRE_COMPOSITION_TABLES defined (c6510 -d FIRE_COMPOSITION_TABLES ...) to use it.",
             "Exported", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
-}
-
-/// <summary>
-/// A plain (non owner-draw) ListView doesn't expose DoubleBuffered
-/// publicly, so Clear()+rebuild - or even per-item SubItem.Text updates -
-/// can flicker without it. Unlike an owner-draw ListBox (whose items paint
-/// via the native WM_DRAWITEM message, a separate path DoubleBuffered
-/// doesn't intercept - discovered the hard way elsewhere in this project),
-/// a plain ListView's own rendering does go through the buffered WM_PAINT
-/// path, so just enabling the property here is enough on its own.
-/// </summary>
-internal sealed class DoubleBufferedListView : ListView
-{
-    public DoubleBufferedListView() => DoubleBuffered = true;
 }
 
 /// <summary>

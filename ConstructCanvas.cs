@@ -41,6 +41,15 @@ internal sealed class ConstructCanvas : Control
     /// <summary>spriteIndex -> whether the piece it currently shows is
     /// hires rather than multicolour - see SpriteBank.IsHires.</summary>
     public Func<int, bool>? IsSpriteHires { get; set; }
+    /// <summary>spriteIndex -> the label chip text drawn above its bounding
+    /// box (e.g. "S3 - #6"), replacing the old separate Sprites table -
+    /// falls back to the plain index if unset.</summary>
+    public Func<int, string>? SpriteLabel { get; set; }
+
+    /// <summary>Fired after a scroll-wheel zoom actually changes Zoom -
+    /// lets ConstructPanel reposition its floating per-sprite inspector,
+    /// which tracks a sprite's on-screen rect.</summary>
+    public event Action? ZoomChanged;
 
     public readonly int[] SpriteX = new int[8];
     public readonly int[] SpriteY = new int[8];
@@ -73,7 +82,9 @@ internal sealed class ConstructCanvas : Control
 
     public void ApplyZoomedSize() => Size = new Size((int)Math.Ceiling(BackdropPicture.Width * Zoom), (int)Math.Ceiling(BackdropPicture.Height * Zoom));
 
-    private Rectangle SpriteRect(int spriteIndex) =>
+    /// <summary>Public so ConstructPanel's floating per-sprite inspector can
+    /// anchor itself to a sprite's current on-screen box.</summary>
+    internal Rectangle SpriteRect(int spriteIndex) =>
         new((int)((SpriteX[spriteIndex] - 24) * Zoom), (int)((SpriteY[spriteIndex] - 50) * Zoom), (int)(SpriteScreenW * Zoom), (int)(SpriteScreenH * Zoom));
 
     protected override void OnPaint(PaintEventArgs e)
@@ -153,8 +164,17 @@ internal sealed class ConstructCanvas : Control
         var rect = SpriteRect(spriteIndex);
         using var pen = new Pen(color, isSelected ? 2 : 1);
         g.DrawRectangle(pen, rect);
-        using var idxBrush = new SolidBrush(color);
-        g.DrawString(spriteIndex.ToString(), Font, idxBrush, rect.X + 2, rect.Y + 1);
+
+        // Label chip sits right above the box instead of a number drawn
+        // inside it - readable at a glance, and it's what replaces the old
+        // separate Sprites table: shows which pool piece this hardware
+        // sprite currently plays, right where the sprite actually is.
+        string label = SpriteLabel?.Invoke(spriteIndex) ?? spriteIndex.ToString();
+        using var labelFont = new Font(Font.FontFamily, 7.5f);
+        var textSize = g.MeasureString(label, labelFont);
+        var chipRect = new RectangleF(rect.X, rect.Y - textSize.Height, textSize.Width + 6, textSize.Height + 1);
+        g.FillRectangle(BrushCache.Get(color), chipRect);
+        g.DrawString(label, labelFont, BrushCache.Get(Color.FromArgb(20, 20, 20)), chipRect.X + 3, chipRect.Y);
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -269,6 +289,7 @@ internal sealed class ConstructCanvas : Control
             scroll.AutoScrollPosition = new Point(-scroll.AutoScrollPosition.X + shiftX, -scroll.AutoScrollPosition.Y + shiftY);
         }
         Invalidate();
+        ZoomChanged?.Invoke();
     }
 
     protected override bool IsInputKey(Keys keyData) =>
