@@ -202,7 +202,8 @@ public sealed class ConstructPanel : UserControl
         // changed - the correct moment to snapshot for undo. MouseDown covers
         // the start of every drag; KeyDown covers arrow-key nudges and also
         // doubles as the Ctrl+Z/Ctrl+Y shortcut while the canvas has focus.
-        _canvas.MouseDown += (_, _) => PushPositionUndo();
+        // Not for the middle button - that only pans the view.
+        _canvas.MouseDown += (_, e) => { if (e.Button != MouseButtons.Middle) PushPositionUndo(); };
         _canvas.KeyDown += (_, e) =>
         {
             if (e.Control && e.KeyCode == Keys.Z && !e.Shift) { UndoPosition(); return; }

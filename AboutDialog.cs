@@ -148,7 +148,8 @@ internal sealed class AboutDialog : Form
         "  Ctrl+click               Add/remove a sprite from the selection group\r\n" +
         "  Ctrl+Z / Ctrl+Y          Undo / redo position and Sprite # changes\r\n" +
         "  Mouse wheel              Zoom the composited preview in / out\r\n" +
-        "  Sprite inspector         Selecting a sprite shows a floating box next to it:\r\n" +
+        "  Middle-click drag        Pan the view\r\n" +
+        "  Sprite inspector        Selecting a sprite shows a floating box next to it:\r\n" +
         "                           < / > step its Sprite # through the pool, and\r\n" +
         "                           X / Y set its position for the current frame\r\n" +
         "  Menu > Show Grid         Toggles the checkerboard shown when no backdrop is loaded\r\n" +

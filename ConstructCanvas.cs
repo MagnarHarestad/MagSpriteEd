@@ -68,6 +68,13 @@ internal sealed class ConstructCanvas : Control
     private int _dragStartMouseX, _dragStartMouseY;
     private readonly Dictionary<int, (int x, int y)> _dragStart = new();
 
+    // Middle-button pan (same gesture as PositionedEditCanvas). Tracked in
+    // SCREEN coordinates: scrolling the parent moves this control itself,
+    // so control-relative mouse positions would shift under the drag.
+    private bool _panning;
+    private Point _panStartScreen;
+    private Point _panStartScroll;
+
     public ConstructCanvas()
     {
         DoubleBuffered = true;
@@ -195,6 +202,16 @@ internal sealed class ConstructCanvas : Control
         if (scrollParent != null && before is { } p && scrollParent.AutoScrollPosition != p)
             scrollParent.AutoScrollPosition = new Point(-p.X, -p.Y);
 
+        if (e.Button == MouseButtons.Middle)
+        {
+            if (scrollParent == null) return;
+            _panning = true;
+            _panStartScreen = Cursor.Position;
+            _panStartScroll = new Point(-scrollParent.AutoScrollPosition.X, -scrollParent.AutoScrollPosition.Y);
+            Cursor = Cursors.SizeAll;
+            return;
+        }
+
         bool ctrl = (ModifierKeys & Keys.Control) != 0;
 
         for (int s = 7; s >= 0; s--)
@@ -239,6 +256,17 @@ internal sealed class ConstructCanvas : Control
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (_panning)
+        {
+            if (Parent is ScrollableControl scroll)
+            {
+                var now = Cursor.Position;
+                scroll.AutoScrollPosition = new Point(
+                    _panStartScroll.X - (now.X - _panStartScreen.X),
+                    _panStartScroll.Y - (now.Y - _panStartScreen.Y));
+            }
+            return;
+        }
         if (!_dragging || SelectedSprites.Count == 0) return;
         int dx = (int)((e.X - _dragStartMouseX) / Zoom);
         int dy = (int)((e.Y - _dragStartMouseY) / Zoom);
@@ -255,6 +283,12 @@ internal sealed class ConstructCanvas : Control
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+        if (e.Button == MouseButtons.Middle && _panning)
+        {
+            _panning = false;
+            Cursor = Cursors.Default;
+            return;
+        }
         _dragging = false;
     }
 
