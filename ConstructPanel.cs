@@ -310,7 +310,8 @@ public sealed class ConstructPanel : UserControl
 
         _pieceLeftBtn = new Button { Text = "<", Width = 22, Height = 22, Margin = new Padding(1, 1, 1, 1) };
         _pieceLeftBtn.Click += (_, _) => StepPiece(-1);
-        _pieceLabel = new Label { AutoSize = true, ForeColor = Color.Gainsboro, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(2, 5, 2, 0) };
+        // MinimumSize keeps the box from shifting width as the number goes 9 -> 10 -> 100.
+        _pieceLabel = new Label { AutoSize = true, MinimumSize = new Size(26, 0), ForeColor = Color.Gainsboro, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(2, 5, 2, 0) };
         _pieceRightBtn = new Button { Text = ">", Width = 22, Height = 22, Margin = new Padding(1, 1, 6, 1) };
         _pieceRightBtn.Click += (_, _) => StepPiece(1);
 
@@ -350,7 +351,7 @@ public sealed class ConstructPanel : UserControl
     }
 
     /// <summary>Steps the primary-selected hardware sprite's Sprite # (its
-    /// raw pool piece index, wrapping) - the inspector's "&lt; Piece N &gt;"
+    /// raw pool piece index, wrapping) - the inspector's "&lt; N &gt;"
     /// control.</summary>
     private void StepPiece(int delta)
     {
@@ -380,17 +381,22 @@ public sealed class ConstructPanel : UserControl
         _suppressEvents = true;
         try
         {
-            _pieceLabel.Text = "Piece " + _spriteSource[_frame][s];
+            _pieceLabel.Text = _spriteSource[_frame][s].ToString();
             _xUpDown.Value = Math.Max(_xUpDown.Minimum, Math.Min(_xUpDown.Maximum, _canvas.SpriteX[s]));
             _yUpDown.Value = Math.Max(_yUpDown.Minimum, Math.Min(_yUpDown.Maximum, _canvas.SpriteY[s]));
         }
         finally { _suppressEvents = prev; }
 
+        // Centred under the sprite (its label chip sits above the box, so
+        // below keeps the two apart); flips above if it would run off the
+        // bottom of the canvas.
         var rect = _canvas.SpriteRect(s);
         _inspector.Size = _inspector.PreferredSize;
-        int x = rect.Right + 6;
-        if (x + _inspector.Width > _canvas.Width) x = Math.Max(0, rect.Left - _inspector.Width - 6);
-        int y = Math.Max(0, Math.Min(rect.Top - 6, _canvas.Height - _inspector.Height));
+        int x = rect.Left + (rect.Width - _inspector.Width) / 2;
+        x = Math.Max(0, Math.Min(x, _canvas.Width - _inspector.Width));
+        int y = rect.Bottom + 4;
+        if (y + _inspector.Height > _canvas.Height) y = rect.Top - _inspector.Height - 4;
+        y = Math.Max(0, Math.Min(y, _canvas.Height - _inspector.Height));
         _inspector.Location = new Point(x, y);
         _inspector.Visible = true;
         _inspector.BringToFront();
