@@ -154,6 +154,8 @@ internal sealed class AboutDialog : Form
         "  Ctrl+click               Add/remove a sprite from the selection group\r\n" +
         "  Arrow keys               Nudge the selected sprite(s) by 1 pixel\r\n" +
         "  Shift+arrow              Nudge by 8 pixels\r\n" +
+        "  Shift+G                  Glue the selected sprite(s) flush against the nearest\r\n" +
+        "                           sprite (smallest move, edges aligned, no overlap)\r\n" +
         "  Mouse wheel              Zoom the composited preview in / out\r\n" +
         "  Middle-click drag        Pan the view\r\n" +
         "  Sprite inspector        Selecting a sprite shows a floating box next to it:\r\n" +

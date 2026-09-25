@@ -13,9 +13,10 @@ namespace MagSpriteEd;
 /// data itself, just renders whatever MainForm's PixelProvider/
 /// PaletteProvider report and reports clicks back via PieceClicked.
 ///
-/// Sized to sit inside an AutoScroll host Panel (like PixelGridControl does
-/// in MainForm's _canvasScroll) - this control's own Height grows with the
-/// piece count, and OnPaint only actually draws whatever thumbnails fall
+/// Sized to sit inside a clipping viewport Panel that MainForm scrolls by
+/// moving this control's Top (driven by a DarkScrollBar) - this control's
+/// own Height grows with the piece count, and OnPaint only actually draws
+/// whatever thumbnails fall
 /// within the current clip rectangle, so drawing cost tracks how many rows
 /// are actually visible on screen, not the total pool size.
 /// </summary>
@@ -37,11 +38,9 @@ internal sealed class SpritePoolStrip : Control
     private const int RowStride = LabelHeight + ThumbHeight + Gap;
 
     /// <summary>Width this control wants - the host lays it out at this
-    /// fixed width regardless of piece count. Uses the actual system
-    /// vertical scrollbar width (not a guessed constant) so the host's
-    /// AutoScroll panel never ends up a few pixels too narrow and grows an
-    /// unwanted horizontal scrollbar alongside its vertical one.</summary>
-    public static int PreferredWidth => ThumbWidth + Pad * 2 + SystemInformation.VerticalScrollBarWidth + 2;
+    /// fixed width regardless of piece count. No scrollbar allowance: the
+    /// host scrolls it with its own DarkScrollBar in a separate column.</summary>
+    public static int PreferredWidth => ThumbWidth + Pad * 2;
 
     public int PieceCount { get; private set; }
     public int SelectedPiece { get; private set; } = -1;

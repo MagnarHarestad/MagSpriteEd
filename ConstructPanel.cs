@@ -41,11 +41,11 @@ public sealed class ConstructPanel : UserControl
     private FlowLayoutPanel _inspector = null!;
     private Button _pieceLeftBtn = null!, _pieceRightBtn = null!;
     private Label _pieceLabel = null!;
-    private NumericUpDown _xUpDown = null!, _yUpDown = null!;
+    private DarkNumberBox _xUpDown = null!, _yUpDown = null!;
 
     private Button _playButton = null!;
-    private NumericUpDown _fpsUpDown = null!;
-    private NumericUpDown _frameCountUpDown = null!;
+    private DarkNumberBox _fpsUpDown = null!;
+    private DarkNumberBox _frameCountUpDown = null!;
     private FrameStrip _frameScrub = null!;
     private Label _frameLabel = null!;
 
@@ -62,6 +62,10 @@ public sealed class ConstructPanel : UserControl
     // ValueChanged/etc. handler right back into the same state update.
     // Every handler that only reacts to a programmatic update checks this first.
     private bool _suppressEvents;
+
+    // Set once the user zooms Construct with the wheel - stops FitZoomToView
+    // overriding their choice on every resize.
+    private bool _userZoomed;
 
     // Per-frame keyframed state: [frame][sprite]. Position and sprite
     // source (which piece of the bank's flat pool to show) both vary per
@@ -101,6 +105,19 @@ public sealed class ConstructPanel : UserControl
         {
             if (_canvas.ShowOutlines == value) return;
             _canvas.ShowOutlines = value;
+            _canvas.Invalidate();
+        }
+    }
+
+    /// <summary>Opens the $d020 border in the preview so sprites placed in
+    /// the border area stay visible - see ConstructCanvas.OpenBorder.</summary>
+    public bool OpenBorder
+    {
+        get => _canvas.OpenBorder;
+        set
+        {
+            if (_canvas.OpenBorder == value) return;
+            _canvas.OpenBorder = value;
             _canvas.Invalidate();
         }
     }
@@ -204,7 +221,7 @@ public sealed class ConstructPanel : UserControl
         _canvas.ApplyZoomedSize();
         _canvas.SelectionChanged += () => { RefreshInspector(); SelectedSpriteSourceChanged?.Invoke(); };
         _canvas.SpriteMoved += CommitCanvasPositionsToCurrentFrame;
-        _canvas.ZoomChanged += RefreshInspector;
+        _canvas.ZoomChanged += () => { _userZoomed = true; RefreshInspector(); };
         _canvas.CellInteract += (s, row, col, button) => SpriteCellPainted?.Invoke(s, row, col, button);
         _canvas.PaintStrokeStarted += () => PaintStrokeStarted?.Invoke();
         _canvas.PaintStrokeEnded += () => PaintStrokeEnded?.Invoke();
@@ -227,9 +244,12 @@ public sealed class ConstructPanel : UserControl
                 PushPositionUndo();
         };
 
-        var canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(10, 10, 10), Padding = new Padding(12) };
-        _canvas.Location = new Point(12, 12);
+        var canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(10, 10, 10), Padding = new Padding(6), Margin = new Padding(0) };
+        _canvas.Location = new Point(6, 6);
         canvasScroll.Controls.Add(_canvas);
+        // Auto-fit the zoom to the (large) Construct area until the user
+        // zooms by hand with the wheel - from then on their zoom sticks.
+        canvasScroll.SizeChanged += (_, _) => FitZoomToView(canvasScroll);
 
         BuildInspector();
         _canvas.Controls.Add(_inspector);
@@ -277,6 +297,23 @@ public sealed class ConstructPanel : UserControl
         return btn;
     }
 
+    /// <summary>Largest 0.5-step zoom at which the whole PAL frame fits the
+    /// visible area, applied unless the user has zoomed by hand.</summary>
+    private void FitZoomToView(Panel host)
+    {
+        if (_userZoomed) return;
+        int availW = host.ClientSize.Width - host.Padding.Horizontal;
+        int availH = host.ClientSize.Height - host.Padding.Vertical;
+        if (availW <= 0 || availH <= 0) return;
+        float fit = Math.Min((float)availW / ConstructCanvas.FrameWidth, (float)availH / ConstructCanvas.FrameHeight);
+        float zoom = Math.Clamp((float)Math.Floor(fit * 2) / 2f, 1f, 8f);
+        if (zoom == _canvas.Zoom) return;
+        _canvas.Zoom = zoom;
+        _canvas.ApplyZoomedSize();
+        _canvas.Invalidate();
+        RefreshInspector();
+    }
+
     private void BuildTimelineRow(FlowLayoutPanel bottomRow)
     {
         var prev = MakeTransportButton(Icons.Prev(), "Previous frame");
@@ -290,7 +327,10 @@ public sealed class ConstructPanel : UserControl
         bottomRow.Controls.Add(_playButton);
         bottomRow.Controls.Add(next);
 
-        _frameLabel = new Label { Text = "Frame 1/8", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(10, 8, 4, 0) };
+        // Fixed width (sized for the widest possible text) so the strip next
+        // to it doesn't shift as the frame number changes.
+        _frameLabel = new Label { Text = "Frame 1/8", AutoSize = false, ForeColor = Color.Gainsboro, Margin = new Padding(10, 8, 4, 0), Height = 18 };
+        _frameLabel.Width = TextRenderer.MeasureText("Frame 128/128", _frameLabel.Font).Width;
         bottomRow.Controls.Add(_frameLabel);
         _frameScrub = new FrameStrip { Maximum = 7, Width = 320, Margin = new Padding(2, 3, 8, 2) };
         _frameScrub.ValueChanged += (_, _) =>
@@ -303,22 +343,22 @@ public sealed class ConstructPanel : UserControl
         };
         bottomRow.Controls.Add(_frameScrub);
 
-        // Timeline length: type a count, then Apply (not live, so typing
-        // "16" doesn't briefly shrink the Timeline to 1 frame on the "1").
+        // Timeline length applies as soon as the value changes. Typing
+        // doesn't commit per keystroke - NumericUpDown only updates Value on
+        // Enter, focus loss or a spinner click - so typing "16" never
+        // briefly shrinks the Timeline to 1 frame on the "1".
         bottomRow.Controls.Add(new Label { Text = "Frames", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 8, 2, 0) });
-        _frameCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 128, Value = 8, Width = 50, Margin = new Padding(2, 3, 2, 2) };
-        bottomRow.Controls.Add(_frameCountUpDown);
-        var applyFrames = MakeTransportButton(Icons.Apply(), "Apply frame count (Timeline length)");
-        applyFrames.Margin = new Padding(1, 1, 14, 1);
-        applyFrames.Click += (_, _) =>
+        _frameCountUpDown = new DarkNumberBox { Minimum = 1, Maximum = 128, Value = 8, Width = 50, TextAlign = HorizontalAlignment.Center, Margin = new Padding(2, 3, 14, 2) };
+        _frameCountUpDown.ValueChanged += (_, _) =>
         {
+            if (_suppressEvents || (int)_frameCountUpDown.Value == _animFrameCount) return;
             StopPlay();
             SetAnimFrameCount((int)_frameCountUpDown.Value);
         };
-        bottomRow.Controls.Add(applyFrames);
+        bottomRow.Controls.Add(_frameCountUpDown);
 
         bottomRow.Controls.Add(new Label { Text = "FPS", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 8, 2, 0) });
-        _fpsUpDown = new NumericUpDown { Minimum = 1, Maximum = 50, Value = 17, Width = 50, Margin = new Padding(2, 2, 10, 2) };
+        _fpsUpDown = new DarkNumberBox { Minimum = 1, Maximum = 50, Value = 17, Width = 50, TextAlign = HorizontalAlignment.Center, Margin = new Padding(2, 3, 10, 2) };
         _fpsUpDown.ValueChanged += (_, _) => _playTimer.Interval = Math.Max(20, (int)(1000 / _fpsUpDown.Value));
         bottomRow.Controls.Add(_fpsUpDown);
 
@@ -337,9 +377,30 @@ public sealed class ConstructPanel : UserControl
         };
         _playDir = 1;
         bottomRow.Controls.Add(_pingPongCheck);
+        // VIC readouts go on a line of their own, so the first line is all
+        // Timeline controls and the frame strip can take its spare width.
+        bottomRow.SetFlowBreak(_pingPongCheck, true);
 
         _d010Label = new Label { Text = "$d010 = %00000000 ($00)", AutoSize = true, ForeColor = Color.FromArgb(140, 140, 140), Margin = new Padding(2, 8, 2, 0) };
         bottomRow.Controls.Add(_d010Label);
+
+        bottomRow.ClientSizeChanged += (_, _) => FitFrameStripWidth(bottomRow);
+    }
+
+    /// <summary>Stretches the frame strip to fill whatever width the rest of
+    /// the Timeline line (transport, Frames, FPS, Ping-pong) leaves over.</summary>
+    private void FitFrameStripWidth(FlowLayoutPanel row)
+    {
+        int others = 0;
+        foreach (Control c in row.Controls)
+        {
+            if (c == _frameScrub) { others += c.Margin.Horizontal; continue; }
+            if (c == _d010Label) continue; // second line
+            others += c.Width + c.Margin.Horizontal;
+        }
+        int want = row.ClientSize.Width - row.Padding.Horizontal - others - 2;
+        want = Math.Max(160, want);
+        if (_frameScrub.Width != want) _frameScrub.Width = want;
     }
 
     /// <summary>Builds the floating panel that hovers next to whichever
@@ -369,7 +430,7 @@ public sealed class ConstructPanel : UserControl
         _pieceRightBtn.Click += (_, _) => StepPiece(1);
 
         var xLabel = new Label { Text = "X", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 5, 2, 0) };
-        _xUpDown = new NumericUpDown { Minimum = 0, Maximum = 511, Width = 46, Margin = new Padding(0, 1, 8, 1) };
+        _xUpDown = new DarkNumberBox { Minimum = 0, Maximum = 511, Width = 46, TextAlign = HorizontalAlignment.Center, Margin = new Padding(0, 1, 8, 1) };
         _xUpDown.Enter += (_, _) => PushPositionUndo();
         _xUpDown.ValueChanged += (_, _) =>
         {
@@ -382,7 +443,7 @@ public sealed class ConstructPanel : UserControl
         };
 
         var yLabel = new Label { Text = "Y", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 5, 2, 0) };
-        _yUpDown = new NumericUpDown { Minimum = 0, Maximum = 255, Width = 46, Margin = new Padding(0, 1, 1, 1) };
+        _yUpDown = new DarkNumberBox { Minimum = 0, Maximum = 255, Width = 46, TextAlign = HorizontalAlignment.Center, Margin = new Padding(0, 1, 1, 1) };
         _yUpDown.Enter += (_, _) => PushPositionUndo();
         _yUpDown.ValueChanged += (_, _) =>
         {
@@ -589,7 +650,7 @@ public sealed class ConstructPanel : UserControl
             try { _frameScrub.Value = _frame; } finally { _suppressEvents = prev; }
         }
         _frameLabel.Text = $"Frame {_frame + 1}/{_animFrameCount}";
-        if (!_frameCountUpDown.Focused)
+        if (!_frameCountUpDown.ContainsFocus)
             _frameCountUpDown.Value = Math.Clamp(_animFrameCount, (int)_frameCountUpDown.Minimum, (int)_frameCountUpDown.Maximum);
         _canvas.Invalidate();
         RecomputeD010Label();
@@ -619,6 +680,40 @@ public sealed class ConstructPanel : UserControl
     /// into its own _currentFrame so pixel editing always tracks whichever
     /// frame is on screen here.</summary>
     public event Action<int>? FrameChanged;
+
+    /// <summary>Shift+G / toolbar Glue: moves the selected sprite(s), as one
+    /// block, flush against the nearest other sprite - see SpriteGlue for
+    /// how the placement is chosen. Returns a status line for MainForm.</summary>
+    public string GlueSelection()
+    {
+        EnsureArraysAllocated();
+        var selected = new List<int>(_canvas.SelectedSprites);
+        if (selected.Count == 0) return "Glue: select a sprite in Construct first (Shift+click).";
+        if (selected.Count >= 8) return "Glue: every sprite is selected - there's nothing left to glue to.";
+
+        var move = SpriteGlue.FindBestMove(_canvas.SpriteX, _canvas.SpriteY, selected);
+        if (move is not { } m) return "Glue: no free spot next to another sprite fits.";
+
+        string what = selected.Count == 1 ? $"Sprite {selected[0]}" : $"{selected.Count} sprites";
+        string where = m.Side switch
+        {
+            SpriteGlue.Side.Left => "left of",
+            SpriteGlue.Side.Right => "right of",
+            SpriteGlue.Side.Above => "above",
+            _ => "below"
+        };
+        if (m.Dx == 0 && m.Dy == 0) return $"Glue: {what} is already glued {where} sprite {m.Target}.";
+
+        PushPositionUndo();
+        foreach (int s in selected)
+        {
+            _canvas.SpriteX[s] += m.Dx;
+            _canvas.SpriteY[s] += m.Dy;
+        }
+        _canvas.Invalidate();
+        CommitCanvasPositionsToCurrentFrame();
+        return $"Glued {what} {where} sprite {m.Target} (moved {m.Dx:+0;-0;0}, {m.Dy:+0;-0;0}).";
+    }
 
     private void CommitCanvasPositionsToCurrentFrame()
     {

@@ -47,6 +47,12 @@ internal sealed class ConstructCanvas : Control
     /// <summary>Faint checkerboard over the $d021 background when no backdrop picture is loaded.</summary>
     public bool ShowGrid { get; set; } = true;
 
+    /// <summary>Previews the VIC open-border trick: the $d020 border is not
+    /// drawn, so sprites placed out in the border area stay visible (over
+    /// $d021, as the opened border shows). A faint dashed line still marks
+    /// where the normal display window ends.</summary>
+    public bool OpenBorder { get; set; }
+
     /// <summary>(spriteIndex, row 0..20, col 0..11) -> raw 2-bit cell value 0..3.</summary>
     public Func<int, int, int, byte>? SpritePixel { get; set; }
     /// <summary>(pixel value, spriteIndex) -> preview colour.</summary>
@@ -137,7 +143,8 @@ internal sealed class ConstructCanvas : Control
         // (its "00" pixels are transparent so $d021 shows through), then
         // sprites, then the $d020 border ON TOP of the sprites - a sprite
         // moved into the border is hidden there, exactly as on the C64.
-        g.FillRectangle(BrushCache.Get(EditorPalette.BorderColor), ClientRectangle);
+        // With the border opened, the whole frame is background.
+        g.FillRectangle(BrushCache.Get(OpenBorder ? EditorPalette.BackgroundColor : EditorPalette.BorderColor), ClientRectangle);
         g.FillRectangle(BrushCache.Get(EditorPalette.BackgroundColor), display);
 
         if (Backdrop != null)
@@ -159,11 +166,19 @@ internal sealed class ConstructCanvas : Control
 
         for (int s = 0; s < 8; s++) DrawSpritePixels(g, s);
 
-        var border = BrushCache.Get(EditorPalette.BorderColor);
-        g.FillRectangle(border, 0, 0, Width, display.Top);
-        g.FillRectangle(border, 0, display.Bottom, Width, Height - display.Bottom);
-        g.FillRectangle(border, 0, display.Top, display.Left, display.Height);
-        g.FillRectangle(border, display.Right, display.Top, Width - display.Right, display.Height);
+        if (OpenBorder)
+        {
+            using var edge = new Pen(Color.FromArgb(110, 255, 255, 255)) { DashStyle = DashStyle.Dash };
+            g.DrawRectangle(edge, display.X, display.Y, display.Width - 1, display.Height - 1);
+        }
+        else
+        {
+            var border = BrushCache.Get(EditorPalette.BorderColor);
+            g.FillRectangle(border, 0, 0, Width, display.Top);
+            g.FillRectangle(border, 0, display.Bottom, Width, Height - display.Bottom);
+            g.FillRectangle(border, 0, display.Top, display.Left, display.Height);
+            g.FillRectangle(border, display.Right, display.Top, Width - display.Right, display.Height);
+        }
 
         // Outlines and labels are an editor overlay, drawn last so a sprite
         // hidden in the border can still be seen and grabbed.

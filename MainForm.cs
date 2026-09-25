@@ -63,13 +63,20 @@ public sealed class MainForm : Form
     private Panel _canvasScroll = null!;
     private SpritePoolStrip _spritePoolStrip = null!;
     private Panel _spritePoolScroll = null!;
+    private DarkScrollBar _poolScrollBar = null!;
+    private TableLayoutPanel _root = null!;
+    // Gap around the Single Sprite View grid (was 20px on every side).
+    private const int EditPad = 6;
+    // Max share of the window width the Single Sprite View grid may take.
+    private const float EditGridWidthShare = 0.24f;
+    private const int PoolScrollBarWidth = 12;
     // Pieces already snapshotted for undo in the current Construct paint stroke.
     private readonly HashSet<int> _constructStrokePieces = new();
 
     private ConstructPanel _constructPanel = null!;
     private ToolStripStatusLabel _statusLabel = null!;
     private ToolStripStatusLabel _fileLabel = null!;
-    private NumericUpDown _poolCountUpDown = null!;
+    private DarkNumberBox _poolCountUpDown = null!;
 
     private ToolStripButton[] _swatchButtons = null!;
     private ToolStripButton _pencilBtn = null!, _fillBtn = null!, _lineBtn = null!, _mirrorBtn = null!;
@@ -127,7 +134,7 @@ public sealed class MainForm : Form
         // Layout right after construction can under-report available space
         // (DPI scaling, the window not having done its first real layout
         // pass yet) - re-fit once more once the form has actually loaded.
-        Load += (_, _) => { FitCanvasToScrollArea(); FitPoolStripWidth(); };
+        Load += (_, _) => { FitEditColumnWidth(); FitCanvasToScrollArea(); FitPoolStripWidth(); };
         SelectFrame(0);
         RefreshStatus("Ready - procedurally-generated bank loaded (matches the original demo's shipped output).");
     }
@@ -152,15 +159,22 @@ public sealed class MainForm : Form
         status.Items.Add(_statusLabel);
         status.Items.Add(_fileLabel);
 
+        // Left column is sized to exactly fit the pool strip + edit grid
+        // (see FitEditColumnWidth); Construct takes all remaining width, so
+        // no dead space is left between the three views.
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
             BackColor = BackColor
         };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 600));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 960));
+        _root = root;
+        root.SizeChanged += (_, _) => { if (_canvasScroll != null) FitEditColumnWidth(); };
 
         // ---- Left: edit canvas - Single Sprite View (one 12x21 piece,
         // highly zoomed in). Drawing in place over the backdrop happens in
@@ -177,13 +191,13 @@ public sealed class MainForm : Form
             PaletteProvider = v => EditorPalette.ColorFor(v, _bank.IndividualColor(_editPiece)),
             BackgroundProvider = () => EditorPalette.BackgroundColor
         };
-        _canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(12, 12, 12), Padding = new Padding(20) };
+        _canvasScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(12, 12, 12), Padding = new Padding(EditPad), Margin = new Padding(0) };
         _canvasScroll.Controls.Add(_canvas);
         _canvas.Location = new Point(20, 20);
         // Re-fit whenever the host area's size actually changes (window
         // resize etc.) - keeps the canvas at the largest zoom that still
         // needs no horizontal scrollbar.
-        _canvasScroll.SizeChanged += (_, _) => FitCanvasToScrollArea();
+        _canvasScroll.SizeChanged += (_, _) => { FitEditColumnWidth(); FitCanvasToScrollArea(); };
 
         // ---- Far left: vertical strip of every pool piece as a small
         // thumbnail. Click one to make it Single Sprite View's edit target;
@@ -201,38 +215,77 @@ public sealed class MainForm : Form
             _spritePoolStrip.SetSelected(piece);
             RefreshAll();
         };
+        // Clipping viewport for the strip - no AutoScroll (whose native
+        // scrollbar is light-themed and sat right up against the edit
+        // canvas): _poolScrollBar, in its own column at the far left,
+        // scrolls it by moving the strip's Top (see UpdatePoolScroll).
         _spritePoolScroll = new Panel
         {
             Dock = DockStyle.Fill,
-            AutoScroll = true,
             BackColor = Color.FromArgb(12, 12, 12),
-            Padding = new Padding(2)
+            Margin = new Padding(0)
         };
         _spritePoolScroll.Controls.Add(_spritePoolStrip);
-        // ClientSizeChanged (not SizeChanged) also catches the case that
-        // actually caused the leftover horizontal scrollbar: the panel's
-        // own outer bounds don't change when SetPieceCount grows the strip
-        // tall enough to need a vertical scrollbar, but its CLIENT area
-        // does (shrinks by the scrollbar's width) - and a hardcoded once-
-        // guessed reservation for that width (SystemInformation's, which
-        // can be a few pixels off from what actually gets drawn depending
-        // on theme/DPI) isn't reliable enough on its own. Re-fitting the
-        // strip's own Width to whatever's actually available, every time
-        // that available space can change, is what actually guarantees no
-        // horizontal scrollbar ever shows up unless the piece truly
-        // doesn't fit any more.
-        _spritePoolScroll.ClientSizeChanged += (_, _) => FitPoolStripWidth();
+        _spritePoolScroll.ClientSizeChanged += (_, _) => { FitPoolStripWidth(); UpdatePoolScroll(); };
+        _spritePoolStrip.SizeChanged += (_, _) => UpdatePoolScroll();
+        _spritePoolStrip.MouseWheel += (_, e) => _poolScrollBar.Wheel(e.Delta);
+        _spritePoolScroll.MouseWheel += (_, e) => _poolScrollBar.Wheel(e.Delta);
+
+        _poolScrollBar = new DarkScrollBar { Dock = DockStyle.Fill, Margin = new Padding(0) };
+        _poolScrollBar.ValueChanged += () => _spritePoolStrip.Top = -_poolScrollBar.Value;
+
+        // Pool size lives at the foot of the strip it controls, instead of
+        // on the main toolbar. No Apply button - it applies on change.
+        var poolFooter = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            BackColor = Color.FromArgb(22, 22, 22),
+            Padding = new Padding(4, 4, 2, 4),
+            Margin = new Padding(0)
+        };
+        poolFooter.Controls.Add(new Label { Text = "Pool", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 7, 2, 0) });
+        _poolCountUpDown = new DarkNumberBox { Minimum = 1, Maximum = 512, Value = _bank.PieceCount, Width = 52, TextAlign = HorizontalAlignment.Center, Margin = new Padding(2, 3, 2, 2) };
+        // Applies as soon as the value changes (Enter, focus loss or a
+        // spinner click - not per keystroke, so typing "16" never passes
+        // through a 1-piece pool).
+        _poolCountUpDown.ValueChanged += (_, _) => ApplyPoolSize();
+        poolFooter.Controls.Add(_poolCountUpDown);
+
+        // [scrollbar | thumbnails] over [Pool footer] - the scrollbar is the
+        // far-left edge of the window, not wedged between strip and canvas.
+        var poolColumn = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Color.FromArgb(12, 12, 12)
+        };
+        poolColumn.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, PoolScrollBarWidth));
+        poolColumn.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        poolColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        poolColumn.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        poolColumn.Controls.Add(_poolScrollBar, 0, 0);
+        poolColumn.Controls.Add(_spritePoolScroll, 1, 0);
+        poolColumn.Controls.Add(poolFooter, 0, 1);
+        poolColumn.SetColumnSpan(poolFooter, 2);
 
         var editArea = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
             BackColor = BackColor
         };
-        editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SpritePoolStrip.PreferredWidth + 4));
+        editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, PoolScrollBarWidth + SpritePoolStrip.PreferredWidth));
         editArea.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        editArea.Controls.Add(_spritePoolScroll, 0, 0);
+        editArea.Controls.Add(poolColumn, 0, 0);
         editArea.Controls.Add(_canvasScroll, 1, 0);
 
         // ---- Right: embedded Construct panel (placement/composition over
@@ -269,6 +322,7 @@ public sealed class MainForm : Form
             }
         };
 
+        _constructPanel.Margin = new Padding(0);
         root.Controls.Add(editArea, 0, 0);
         root.Controls.Add(_constructPanel, 1, 0);
 
@@ -290,10 +344,30 @@ public sealed class MainForm : Form
         if (_editPiece < 0 || _editPiece >= _spritePoolStrip.PieceCount) return;
         int top = _spritePoolStrip.PieceTop(_editPiece);
         int bottom = _spritePoolStrip.PieceBottom(_editPiece);
-        int viewTop = -_spritePoolScroll.AutoScrollPosition.Y;
+        int viewTop = _poolScrollBar.Value;
         int viewHeight = _spritePoolScroll.ClientSize.Height;
-        if (top < viewTop) _spritePoolScroll.AutoScrollPosition = new Point(0, top);
-        else if (bottom > viewTop + viewHeight) _spritePoolScroll.AutoScrollPosition = new Point(0, bottom - viewHeight);
+        if (top < viewTop) _poolScrollBar.Value = top;
+        else if (bottom > viewTop + viewHeight) _poolScrollBar.Value = bottom - viewHeight;
+    }
+
+    /// <summary>Re-syncs the pool scrollbar's range with the strip's height
+    /// and the viewport's - called whenever either changes.</summary>
+    private void UpdatePoolScroll()
+    {
+        _poolScrollBar.LargeChange = Math.Max(1, _spritePoolScroll.ClientSize.Height);
+        _poolScrollBar.Maximum = _spritePoolStrip.Height;
+        _spritePoolStrip.Top = -_poolScrollBar.Value;
+    }
+
+    private void ApplyPoolSize()
+    {
+        if ((int)_poolCountUpDown.Value == _bank.PieceCount) return;
+        if (!TryApplyPoolSize((int)_poolCountUpDown.Value)) { _poolCountUpDown.Value = _bank.PieceCount; return; }
+        _editPiece = Math.Min(_editPiece, _bank.PieceCount - 1);
+        _spritePoolStrip.SetPieceCount(_bank.PieceCount);
+        _constructPanel.RefreshAfterPoolChange();
+        RefreshAll();
+        RefreshStatus($"Sprite pool size set to {_bank.PieceCount}.");
     }
 
     // ---------------------------------------------------------------------
@@ -401,8 +475,6 @@ public sealed class MainForm : Form
             btn.MouseUp += (_, e) => { if (e.Button == MouseButtons.Right) ShowPalettePopup(idx, btn); };
             _swatchButtons[v] = btn;
         }
-        byte[] visualOrder = { 0, 1, 3, 2 }; // Background, MC1, MC2, Individual
-        foreach (var v in visualOrder) _toolbar.Items.Add(_swatchButtons[v]);
 
         // -- $d020 border: not a drawing colour, so any click opens the palette. --
         _borderBtn = new ToolStripButton
@@ -415,7 +487,10 @@ public sealed class MainForm : Form
             if (e.Button is MouseButtons.Left or MouseButtons.Right)
                 ShowColorPopup(_borderBtn, EditorPalette.SetBorder);
         };
-        _toolbar.Items.Add(_borderBtn);
+        _toolbar.Items.Add(_borderBtn); // left of Background
+
+        byte[] visualOrder = { 0, 1, 3, 2 }; // Background, MC1, MC2, Individual
+        foreach (var v in visualOrder) _toolbar.Items.Add(_swatchButtons[v]);
 
         EditorPalette.Changed += () =>
         {
@@ -495,24 +570,6 @@ public sealed class MainForm : Form
 
         _toolbar.Items.Add(new ToolStripSeparator());
 
-        // -- Sprite pool size: how many distinct 12x21 art pieces exist,
-        // entirely independent of the Frame count below. (Swapped ahead of
-        // Frames, per request.) --
-        _toolbar.Items.Add(new ToolStripLabel("Pool") { ForeColor = Color.Gainsboro });
-        _poolCountUpDown = new NumericUpDown { Minimum = 1, Maximum = 512, Value = _bank.PieceCount };
-        _toolbar.Items.Add(new ToolStripControlHost(_poolCountUpDown) { AutoSize = false, Width = 50 });
-        AddToolbarButton(Icons.Apply(), "Apply sprite pool size (how many distinct pieces of art exist)", (_, _) =>
-        {
-            if (!TryApplyPoolSize((int)_poolCountUpDown.Value)) { _poolCountUpDown.Value = _bank.PieceCount; return; }
-            _editPiece = Math.Min(_editPiece, _bank.PieceCount - 1);
-            _spritePoolStrip.SetPieceCount(_bank.PieceCount);
-            _constructPanel.RefreshAfterPoolChange();
-            RefreshAll();
-            RefreshStatus($"Sprite pool size set to {_bank.PieceCount}.");
-        });
-
-        _toolbar.Items.Add(new ToolStripSeparator());
-
         // -- Frame steps. The "Frames" count field + Apply live in
         // Construct's own Timeline row, next to the frame strip. --
         AddToolbarButton(Icons.FrameInsert(), "Add 1 new frame step at the current Timeline position (duplicate of it)", (_, _) => AddFrameStepAtCurrent());
@@ -526,7 +583,23 @@ public sealed class MainForm : Form
 
         _toolbar.Items.Add(new ToolStripSeparator());
 
-        // -- Sprite outline visibility in Construct's composited preview -
+        // -- Open border: preview the VIC open-border trick, so sprites in
+        // the $d020 border area are shown instead of hidden by it. --
+        var openBorderBtn = new ToolStripButton
+        {
+            Image = Icons.OpenBorder(),
+            DisplayStyle = ToolStripItemDisplayStyle.Image,
+            ToolTipText = "Open border - show sprites placed in the $d020 border area (VIC open-border trick)",
+            CheckOnClick = true
+        };
+        openBorderBtn.CheckedChanged += (_, _) => _constructPanel.OpenBorder = openBorderBtn.Checked;
+        _toolbar.Items.Add(openBorderBtn);
+
+        // -- Glue (also Shift+G): snap the selected sprite(s) flush against
+        // the nearest other sprite. --
+        AddToolbarButton(Icons.Glue(), "Glue selected sprite(s) to the nearest sprite (Shift+G)", (_, _) => GlueSelection());
+
+        // -- Sprite outline visibility (far right of the toolbar) in Construct's composited preview -
         // moved here from the removed "Backdrop" panel's own checkbox. --
         var outlinesBtn = new ToolStripButton
         {
@@ -534,7 +607,9 @@ public sealed class MainForm : Form
             DisplayStyle = ToolStripItemDisplayStyle.Image,
             ToolTipText = "Show sprite outlines (bounding box + index) in Construct's preview",
             CheckOnClick = true,
-            Checked = true
+            Checked = true,
+            // Pinned to the toolbar's right edge, apart from the other icons.
+            Alignment = ToolStripItemAlignment.Right
         };
         outlinesBtn.CheckedChanged += (_, _) => _constructPanel.ShowSpriteOutlines = outlinesBtn.Checked;
         _toolbar.Items.Add(outlinesBtn);
@@ -643,6 +718,24 @@ public sealed class MainForm : Form
     /// the same "unit" size drives both column counts. Called on resize and
     /// whenever _editPiece or its hires flag changes (see RefreshAll/
     /// SyncHiresButton).</summary>
+    /// <summary>Sizes the left column to exactly the pool strip plus the
+    /// edit grid, so the Construct column gets every remaining pixel. The
+    /// grid is capped at EditGridWidthShare of the window width - most
+    /// drawing happens in Construct, so it gets the bigger area.</summary>
+    private void FitEditColumnWidth()
+    {
+        int availH = _canvasScroll.ClientSize.Height - _canvasScroll.Padding.Vertical;
+        if (availH <= 0 || _root.ClientSize.Width <= 0) return;
+        int byHeight = availH / SpriteBank.QuadRows;
+        int byWidth = (int)(_root.ClientSize.Width * EditGridWidthShare) / SpriteBank.HiresCols;
+        int unit = Math.Clamp(Math.Min(byHeight, byWidth), MinEditCellHeight, MaxEditCellHeight);
+        int gridW = unit * SpriteBank.HiresCols + 1;
+        int want = PoolScrollBarWidth + SpritePoolStrip.PreferredWidth + gridW + _canvasScroll.Padding.Horizontal;
+        if (unit * SpriteBank.QuadRows + 1 > availH) want += SystemInformation.VerticalScrollBarWidth;
+        want = Math.Max(200, Math.Min(want, _root.ClientSize.Width - 400));
+        if (Math.Abs(_root.ColumnStyles[0].Width - want) > 0.5f) _root.ColumnStyles[0].Width = want;
+    }
+
     private void FitCanvasToScrollArea()
     {
         int availW = _canvasScroll.ClientSize.Width - _canvasScroll.Padding.Horizontal;
@@ -656,14 +749,10 @@ public sealed class MainForm : Form
         _canvas.Location = new Point(_canvasScroll.Padding.Left, _canvasScroll.Padding.Top);
     }
 
-    /// <summary>Keeps the pool strip's own Width exactly matching whatever
-    /// horizontal space _spritePoolScroll's client area actually has right
-    /// now, so it never ends up a few pixels wider than what's genuinely
-    /// available (which is what triggers an unwanted horizontal
-    /// scrollbar) - see the ClientSizeChanged wiring in BuildUi.</summary>
+    /// <summary>Keeps the pool strip's Width matching its viewport's.</summary>
     private void FitPoolStripWidth()
     {
-        int availW = _spritePoolScroll.ClientSize.Width - _spritePoolScroll.Padding.Horizontal;
+        int availW = _spritePoolScroll.ClientSize.Width;
         if (availW <= 0) return;
         _spritePoolStrip.Width = availW;
     }
@@ -711,6 +800,15 @@ public sealed class MainForm : Form
             return;
         }
 
+        // Shift+G: glue the Construct selection to the nearest sprite.
+        if (e.Shift && !e.Control && !e.Alt && e.KeyCode == Keys.G && !IsTextEntryFocused())
+        {
+            GlueSelection();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+
         // Colour shortcuts (0=Background,1=MC1,2=MC2,3=Individual - matching
         // the toolbar's left-to-right order, not the underlying byte value)
         // only when not typing into a text field (X/Y/Sprite#/Frame count/etc.).
@@ -721,6 +819,8 @@ public sealed class MainForm : Form
             e.SuppressKeyPress = true;
         }
     }
+
+    private void GlueSelection() => RefreshStatus(_constructPanel.GlueSelection());
 
     private static bool IsColorShortcutKey(Keys key, out byte color)
     {
@@ -747,7 +847,7 @@ public sealed class MainForm : Form
     private bool IsTextEntryFocused()
     {
         var c = GetDeepestActiveControl(this);
-        return c is NumericUpDown or TextBoxBase or ComboBox;
+        return c is NumericUpDown or DarkNumberBox or TextBoxBase or ComboBox;
     }
 
     // ---------------------------------------------------------------------

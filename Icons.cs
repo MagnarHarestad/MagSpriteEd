@@ -288,6 +288,34 @@ internal static class Icons
 
     // A dashed bounding box with a corner index number - what Construct
     // draws around each sprite when outlines are on.
+    /// <summary>A screen whose outer border is only dashed (opened), with a
+    /// sprite block poking out through it.</summary>
+    public static Bitmap OpenBorder() => Make(g =>
+    {
+        g.SmoothingMode = SmoothingMode.None;
+        using var outer = new Pen(Stroke, 1f) { DashStyle = DashStyle.Dash };
+        g.DrawRectangle(outer, 1, 2, 17, 15);
+        using var inner = new Pen(Stroke, 1.4f);
+        g.DrawRectangle(inner, 5, 6, 9, 7);
+        using var sprite = new SolidBrush(Color.FromArgb(120, 180, 255));
+        g.FillRectangle(sprite, 11, 3, 6, 5);
+    });
+
+    /// <summary>Two sprite boxes with inward-pointing triangles above them
+    /// - pulled together, glued.</summary>
+    public static Bitmap Glue() => Make(g =>
+    {
+        g.SmoothingMode = SmoothingMode.None;
+        using var box = new Pen(Stroke, 1.4f);
+        g.DrawRectangle(box, 2, 8, 7, 9);
+        using var fill = new SolidBrush(Color.FromArgb(120, 180, 255));
+        g.FillRectangle(fill, 11, 8, 8, 10);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var arrow = new SolidBrush(Stroke);
+        g.FillPolygon(arrow, new PointF[] { new(3, 1.5f), new(3, 6.5f), new(8.5f, 4) });
+        g.FillPolygon(arrow, new PointF[] { new(18, 1.5f), new(18, 6.5f), new(12.5f, 4) });
+    });
+
     public static Bitmap Outline() => Make(g =>
     {
         using var pen = new Pen(Stroke, 1.4f) { DashStyle = DashStyle.Dash };
