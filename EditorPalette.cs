@@ -13,7 +13,7 @@ namespace MagSpriteEd;
 ///   Individual = $d027-$d02e, per sprite - lives on each SpriteBank piece
 ///                (IndividualColor), not here; IndividualIndex is only the
 ///                default a new piece starts with.
-/// Never affects ToAsm()/ToBinary() - those only ever deal in the 0-3
+/// Never affects the exports (ToBinary / Export Animation) - those only ever deal in the 0-3
 /// pixel-type values, never actual colours.
 /// </summary>
 internal static class EditorPalette

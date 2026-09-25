@@ -133,22 +133,6 @@ internal static class Icons
         g.DrawRectangle(pen, 7, 2, 6, 3);
     });
 
-    public static Bitmap Wand() => Make(g =>
-    {
-        using var pen = new Pen(Stroke, 1.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        g.DrawLine(pen, 4, 16, 14, 6);
-        using var b = new SolidBrush(Stroke);
-        g.FillPolygon(b, StarPoints(16, 4, 3));
-        g.FillEllipse(b, 5, 14, 2, 2);
-    });
-
-    private static PointF[] StarPoints(float cx, float cy, float r) => new PointF[]
-    {
-        new(cx, cy - r), new(cx + r * 0.3f, cy - r * 0.3f), new(cx + r, cy),
-        new(cx + r * 0.3f, cy + r * 0.3f), new(cx, cy + r), new(cx - r * 0.3f, cy + r * 0.3f),
-        new(cx - r, cy), new(cx - r * 0.3f, cy - r * 0.3f)
-    };
-
     public static Bitmap Undo() => Make(g =>
     {
         using var pen = new Pen(Stroke, 2f) { EndCap = LineCap.ArrowAnchor, StartCap = LineCap.Round };

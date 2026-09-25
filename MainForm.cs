@@ -418,18 +418,17 @@ public sealed class MainForm : Form
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("About MagSpriteEd...", Icons.Info(), (_, _) => DeferDialogAction(ShowAbout)));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("New Blank Bank", Icons.New(), (_, _) => NewBlankBank()));
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("New Procedural Bank", Icons.Wand(), (_, _) => NewProceduralBank()));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Sprite Bank (.prg + .sym)...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadSpriteBankFromCompiled)));
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Sprite Bank (.png)...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadSpriteBankFromPng)));
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Sprite Bank (.prg + .sym / .png)...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadSpriteBank)));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Project (.json)...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadProject)));
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Save Project (.json)...", Icons.Save(), (_, _) => DeferDialogAction(SaveProject)));
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Save Project", Icons.Save(), (_, _) => SaveProjectQuick()));
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Project...", Icons.FolderOpen(), (_, _) => DeferDialogAction(LoadProject)));
+        // Ctrl+S / Ctrl+Shift+S are handled in MainForm_KeyDown; the
+        // display strings just show them in the menu.
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Save Project", Icons.Save(), (_, _) => SaveProjectQuick()) { ShortcutKeyDisplayString = "Ctrl+S" });
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Save Project As...", Icons.Save(), (_, _) => DeferDialogAction(SaveProject)) { ShortcutKeyDisplayString = "Ctrl+Shift+S" });
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export ASM (MagSpriteEd_Sprites_Data.s)...", Icons.Export(), (_, _) => DeferDialogAction(ExportAsm)));
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export Binary (.bin)...", Icons.Export(), (_, _) => DeferDialogAction(ExportBinary)));
-        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export Optimized ASM (deduplicated)...", Icons.Export(), (_, _) => DeferDialogAction(_constructPanel.ExportOptimizedAsm)));
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export Spritebank...", Icons.Export(), (_, _) => DeferDialogAction(ExportSpritebank)));
+        menuBtn.DropDownItems.Add(new ToolStripMenuItem("Export Animation...", Icons.Export(), (_, _) => DeferDialogAction(_constructPanel.ExportAnimation)));
         menuBtn.DropDownItems.Add(new ToolStripSeparator());
         menuBtn.DropDownItems.Add(new ToolStripMenuItem("Load Backdrop Picture (.kla)...", Icons.Picture(), (_, _) => DeferDialogAction(LoadBackdropPicture)));
         var gridItem = new ToolStripMenuItem("Show Grid in Construct") { CheckOnClick = true, Checked = true };
@@ -795,6 +794,16 @@ public sealed class MainForm : Form
         if ((undoKey || redoKey) && !IsTextEntryFocused())
         {
             if (undoKey) UndoLatest(); else RedoLatest();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+
+        // Ctrl+S: save to the current project file (asks the first time);
+        // Ctrl+Shift+S: always ask where to save.
+        if (e.Control && !e.Alt && e.KeyCode == Keys.S)
+        {
+            if (e.Shift) SaveProject(); else SaveProjectQuick();
             e.Handled = true;
             e.SuppressKeyPress = true;
             return;
@@ -1266,21 +1275,6 @@ public sealed class MainForm : Form
         _constructPanel.ClearPositionRedo();
     }
 
-    private void PushUndoAll()
-    {
-        // Snapshot every piece as one grouped undo step is unnecessary here -
-        // "Procedural (all)" is easy to reverse by re-loading/undoing per
-        // piece is not exact, so just snapshot everything and rely on
-        // Undo per-piece afterwards for anything else.
-        for (int p = 0; p < _bank.PieceCount; p++)
-        {
-            _undo.Add((p, _bank.ClonePiece(p), UndoClock.Next()));
-        }
-        TrimUndo();
-        _redo.Clear();
-        _constructPanel.ClearPositionRedo();
-    }
-
     private void TrimUndo()
     {
         while (_undo.Count > UndoCap) _undo.RemoveAt(0);
@@ -1390,22 +1384,6 @@ public sealed class MainForm : Form
         RefreshStatus("New blank bank: 8 sprite pieces, 8 frames.");
     }
 
-    private void NewProceduralBank()
-    {
-        if (!ConfirmDiscard()) return;
-        _bank = CreateDefaultBank();
-        _undo.Clear(); _redo.Clear();
-        _lastPrgPath = null; _lastSymPath = null; _lastProjectPath = null;
-        _editPiece = 0;
-        _editPieceOwnerSprite = -1;
-        _poolCountUpDown.Value = _bank.PieceCount;
-        _spritePoolStrip.SetPieceCount(_bank.PieceCount);
-        _constructPanel.ResetForNewBank(8);
-        SelectFrame(0);
-        RefreshAll();
-        RefreshStatus("New procedural bank: 8 sprite pieces, 8 frames.");
-    }
-
     private bool ConfirmDiscard()
     {
         if (_undo.Count == 0) return true;
@@ -1424,18 +1402,44 @@ public sealed class MainForm : Form
         return Environment.CurrentDirectory;
     }
 
-    private void LoadSpriteBankFromCompiled()
+    /// <summary>One loader for every sprite bank format - picked by the
+    /// chosen file's extension: a compiled .prg (with its matching .sym,
+    /// found next to it or asked for; picking the .sym itself works too) or
+    /// a .png sprite sheet (see SpriteBank.LoadFromPng).</summary>
+    private void LoadSpriteBank()
     {
         string root = GuessProjectRoot();
         using var ofd = new OpenFileDialog
         {
-            Title = "Load compiled sprite bank - select program.prg",
-            Filter = "PRG files (*.prg)|*.prg|All files (*.*)|*.*",
+            Title = "Load sprite bank",
+            Filter = "Sprite banks (*.prg;*.sym;*.png)|*.prg;*.sym;*.png|" +
+                     "Compiled bank (*.prg + matching .sym)|*.prg;*.sym|" +
+                     "PNG sprite sheet (*.png)|*.png|" +
+                     "All files (*.*)|*.*",
             InitialDirectory = Directory.Exists(root) ? root : Environment.CurrentDirectory
         };
         if (ofd.ShowDialog(this) != DialogResult.OK) return;
 
-        string prgPath = ofd.FileName;
+        string ext = Path.GetExtension(ofd.FileName).ToLowerInvariant();
+        switch (ext)
+        {
+            case ".png": LoadSpriteBankFromPng(ofd.FileName); break;
+            case ".prg": LoadSpriteBankFromCompiled(ofd.FileName); break;
+            case ".sym": LoadSpriteBankFromCompiled(Path.ChangeExtension(ofd.FileName, ".prg")); break;
+            default:
+                MessageBox.Show(this, $"Unsupported sprite bank format \"{ext}\" - choose a .prg (+ .sym) or a .png.",
+                    "Load failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                break;
+        }
+    }
+
+    private void LoadSpriteBankFromCompiled(string prgPath)
+    {
+        if (!File.Exists(prgPath))
+        {
+            MessageBox.Show(this, $"Couldn't find the program file:\n{prgPath}", "Load failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
         string symPath = Path.ChangeExtension(prgPath, ".sym");
         if (!File.Exists(symPath))
         {
@@ -1462,18 +1466,11 @@ public sealed class MainForm : Form
         }
     }
 
-    private void LoadSpriteBankFromPng()
+    private void LoadSpriteBankFromPng(string pngPath)
     {
-        using var ofd = new OpenFileDialog
-        {
-            Title = "Load sprite bank - select a PNG sprite sheet",
-            Filter = "PNG images (*.png)|*.png|All files (*.*)|*.*"
-        };
-        if (ofd.ShowDialog(this) != DialogResult.OK) return;
-
         try
         {
-            _bank = SpriteBank.LoadFromPng(ofd.FileName, out int[] slotColors, out string log);
+            _bank = SpriteBank.LoadFromPng(pngPath, out int[] slotColors, out string log);
             _lastPrgPath = null;
             _lastSymPath = null;
             EditorPalette.Set(1, slotColors[1]);
@@ -1574,35 +1571,14 @@ public sealed class MainForm : Form
         }
     }
 
-    private void ExportAsm()
-    {
-        string root = GuessProjectRoot();
-        string startupDir = Path.Combine(root, "Startup");
-        using var sfd = new SaveFileDialog
-        {
-            Title = "Export ASM - overwrites MagSpriteEd_Sprites_Data.s",
-            Filter = "Assembly source (*.s)|*.s|All files (*.*)|*.*",
-            FileName = "MagSpriteEd_Sprites_Data.s",
-            InitialDirectory = Directory.Exists(startupDir) ? startupDir : root
-        };
-        if (sfd.ShowDialog(this) != DialogResult.OK) return;
-        try
-        {
-            File.WriteAllText(sfd.FileName, _bank.ToAsm());
-            RefreshStatus("Exported ASM to " + sfd.FileName +
-                "  -- build with FIRE_SPRITES_MANUAL defined (c6510 -d FIRE_SPRITES_MANUAL ...) to use it.");
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "Export failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
-
-    private void ExportBinary()
+    /// <summary>Menu > Export Spritebank: every sprite in the pool as one
+    /// raw binary, 64 bytes per sprite in C64 hardware format (see
+    /// SpriteBank.ToBinary) - ready to incbin at a 64-byte-aligned address.</summary>
+    private void ExportSpritebank()
     {
         using var sfd = new SaveFileDialog
         {
-            Title = "Export raw binary",
+            Title = "Export spritebank (C64 sprite format)",
             Filter = "Binary (*.bin)|*.bin|All files (*.*)|*.*",
             FileName = "magspriteed_sprites.bin"
         };
@@ -1610,7 +1586,7 @@ public sealed class MainForm : Form
         try
         {
             File.WriteAllBytes(sfd.FileName, _bank.ToBinary());
-            RefreshStatus("Exported binary to " + sfd.FileName);
+            RefreshStatus($"Exported {_bank.PieceCount} sprite(s), {_bank.PieceCount * SpriteBank.SpriteBytes} bytes, to {sfd.FileName}");
         }
         catch (Exception ex)
         {

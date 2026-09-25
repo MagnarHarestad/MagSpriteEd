@@ -12,7 +12,7 @@ effect (`PlasmaBollLightningBolts3D`), which is why the `FIRE_SPRITES_MANUAL` /
 origin - they're the actual flags that demo's own assembly source expects,
 not something this tool can rename on its own. The app itself has no
 dependency on that project being present, though: point it at any compiled
-`.prg`/`.sym` pair or start from a blank/procedural bank, and it works
+`.prg`/`.sym` pair or start from a blank bank, and it works
 entirely standalone. Its own export labels use a `magspriteed_frameN_*`
 naming convention; loading a `.prg`/`.sym` compiled before this tool's
 rename (still using the legacy `fire_frameN_*` labels) is also supported.
@@ -42,8 +42,8 @@ rename (still using the legacy `fire_frameN_*` labels) is also supported.
   pool slot first, so you never accidentally repaint art used elsewhere.
 - **Undo/redo** - One time-ordered history covering both pixel edits and
   position/composition changes.
-- **Procedural generator** - Seeds the whole pool (or a single piece) with a
-  parametric flame shape as a starting point.
+- **Procedural starting bank** - The app opens with a pool seeded with a
+  parametric flame shape as a starting point (Menu > New Blank Bank clears it).
 - **Project files (`.json`)** - Save/load the sprite bank, the full Construct
   composition, and the backdrop picture (embedded as bytes, so the project
   stays self-contained even if the source `.kla` moves).
@@ -52,12 +52,14 @@ rename (still using the legacy `fire_frameN_*` labels) is also supported.
   `magspriteed_frameN_{tl,tr,bl,br}` (or legacy `fire_frameN_{tl,tr,bl,br}`)
   symbols.
 - **Export**
-  - ASM source (`MagSpriteEd_Sprites_Data.s`-style), one label per sprite piece.
-  - Deduplicated/optimized ASM plus composition tables (positions,
-    per-frame Sprite # arrays, and a per-sprite hires/multicolour flag
-    table), for a build that reads the animation back out of tables
-    instead of hand-written code.
-  - Raw binary (`.bin`).
+  - **Export Spritebank** - every sprite in the pool as one raw binary
+    (`.bin`), 64 bytes per sprite in the C64's own sprite format (21 rows
+    x 3 bytes + 1 pad byte), in pool order.
+  - **Export Animation** - the whole Construct animation as ASM: only the
+    sprites the Timeline actually uses, deduplicated, plus per-frame tables
+    (Sprite # pointers, X/Y positions, `$d010`, a hires/multicolour flag per
+    sprite, and ping-pong), for a build that plays the animation back out of
+    tables instead of hand-written code.
 
 ## Requirements
 

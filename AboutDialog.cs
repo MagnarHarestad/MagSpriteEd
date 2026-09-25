@@ -59,13 +59,14 @@ internal sealed class AboutDialog : Form
                 "animation frame over a real C64 backdrop, and export 6502 assembly or binary.\r\n" +
                 "\r\n" +
                 "HOW TO USE\r\n" +
-                "  1. Start a bank: New Blank / New Procedural, or load one from a\r\n" +
+                "  1. Start a bank: New Blank Bank, or load one from a\r\n" +
                 "     .prg + .sym pair, a sprite-sheet .png (24x21 sprites, 2 px wide\r\n" +
                 "     pixels, black = transparent, max 3 colours) or a saved project (.json).\r\n" +
                 "  2. Draw pool pieces in the Single Sprite View, or right on the sprites in Construct.\r\n" +
                 "  3. In Construct, load a .kla backdrop, set the number of frames, and choose\r\n" +
                 "     each hardware sprite's Sprite # and X/Y per frame. Play to preview.\r\n" +
-                "  4. Save the project, then export ASM (plain or optimized) or a binary."
+                "  4. Save the project, then Export Spritebank (binary, all sprites) or\r\n" +
+                "     Export Animation (ASM: used sprites + per-frame tables)."
         };
         var creditLabel = new Label
         {
@@ -137,6 +138,7 @@ internal sealed class AboutDialog : Form
         "  0 / 1 / 2 / 3            Select colour (Background / MC1 / MC2 / Individual)\r\n" +
         "  Ctrl+Z / Ctrl+Y          Undo / redo the last change - drawing or sprite\r\n" +
         "                           placement, in the order you made them\r\n" +
+        "  Ctrl+S / Ctrl+Shift+S    Save project / Save project as (choose a file)\r\n" +
         "  Right-click a swatch     Change that swatch's real C64 colour - Background\r\n" +
         "                           ($d021), MC1 and MC2 are shared by all sprites,\r\n" +
         "                           Individual applies only to the sprite being edited\r\n" +

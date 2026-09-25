@@ -368,7 +368,7 @@ public sealed class ConstructPanel : UserControl
             ForeColor = Color.Gainsboro,
             AutoSize = true,
             Margin = new Padding(2, 6, 16, 2),
-            // Also written into the "Export Optimized ASM" output as
+            // Also written into the "Export Animation" output as
             // var magspriteed_opt_pingpong - Fire.s's Fire_Frame reads that
             // to pick ping-pong vs. simple forward-wrap playback on the C64
             // itself (see BuildOptimizedAsmExport), so this one checkbox
@@ -1176,11 +1176,14 @@ public sealed class ConstructPanel : UserControl
         return sb.ToString();
     }
 
-    public void ExportOptimizedAsm()
+    /// <summary>Menu > Export Animation: the whole Construct animation as
+    /// ASM - the deduplicated sprites actually used, plus per-frame tables
+    /// (Sprite # pointers, X/Y, $d010, hires flags, ping-pong).</summary>
+    public void ExportAnimation()
     {
         using var sfd = new SaveFileDialog
         {
-            Title = "Export optimized (deduplicated) ASM composition",
+            Title = "Export animation (deduplicated sprites + per-frame tables)",
             Filter = "Assembly source (*.s)|*.s|All files (*.*)|*.*",
             FileName = "MagSpriteEd_Composition_Data.s"
         };
