@@ -168,8 +168,13 @@ internal sealed class ConstructCanvas : Control
 
         if (OpenBorder)
         {
-            using var edge = new Pen(Color.FromArgb(110, 255, 255, 255)) { DashStyle = DashStyle.Dash };
-            g.DrawRectangle(edge, display.X, display.Y, display.Width - 1, display.Height - 1);
+            // The display-window edge is an editor outline like the sprite
+            // boxes, so the same Show/Hide Outlines toggle controls it.
+            if (ShowOutlines)
+            {
+                using var edge = new Pen(Color.FromArgb(110, 255, 255, 255)) { DashStyle = DashStyle.Dash };
+                g.DrawRectangle(edge, display.X, display.Y, display.Width - 1, display.Height - 1);
+            }
         }
         else
         {

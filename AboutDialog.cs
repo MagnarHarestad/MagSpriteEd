@@ -168,8 +168,9 @@ internal sealed class AboutDialog : Form
         "TOOLS\r\n" +
         "  Pencil / Fill / Line     Left = paint, right = erase\r\n" +
         "  Mirror                   Mirrors every stroke left/right while enabled\r\n" +
-        "  Show sprite outlines     Toggles the bounding box + index number Construct\r\n" +
-        "                           draws over each sprite in its composited preview\r\n" +
+        "  Show/Hide Outlines       Toggles the bounding box + label Construct draws over\r\n" +
+        "                           each sprite, and the dashed display-window edge shown\r\n" +
+        "                           while the border is open\r\n" +
         "  Copy/Paste frame icons   Copy this animation frame's full sprite composition\r\n" +
         "                           (positions + Sprite #s, all 8 sprites) to an in-memory\r\n" +
         "                           clipboard, and paste it into any other frame\r\n" +

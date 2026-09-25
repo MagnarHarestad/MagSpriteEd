@@ -604,7 +604,7 @@ public sealed class MainForm : Form
         {
             Image = Icons.Outline(),
             DisplayStyle = ToolStripItemDisplayStyle.Image,
-            ToolTipText = "Show sprite outlines (bounding box + index) in Construct's preview",
+            ToolTipText = "Show/Hide Outlines",
             CheckOnClick = true,
             Checked = true,
             // Pinned to the toolbar's right edge, apart from the other icons.
