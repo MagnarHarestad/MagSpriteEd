@@ -70,6 +70,13 @@ internal sealed class PixelGridControl : Control
         Invalidate();
     }
 
+    /// <summary>Repaints a single cell (plus its grid lines).</summary>
+    public void InvalidateCell(int row, int col)
+    {
+        if (row < 0 || row >= Rows || col < 0 || col >= Cols) return;
+        Invalidate(new Rectangle(col * CellWidth, row * CellHeight, CellWidth + 1, CellHeight + 1));
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -78,9 +85,14 @@ internal sealed class PixelGridControl : Control
         g.PixelOffsetMode = PixelOffsetMode.Half;
 
         Color? background = BackgroundProvider?.Invoke();
-        for (int r = 0; r < Rows; r++)
+        // Only the cells inside the area being repainted - a pencil stroke
+        // invalidates just the cell(s) it touched (see InvalidateCell).
+        var clip = e.ClipRectangle;
+        int r0 = Math.Max(0, clip.Top / CellHeight), r1 = Math.Min(Rows - 1, clip.Bottom / CellHeight);
+        int c0 = Math.Max(0, clip.Left / CellWidth), c1 = Math.Min(Cols - 1, clip.Right / CellWidth);
+        for (int r = r0; r <= r1; r++)
         {
-            for (int c = 0; c < Cols; c++)
+            for (int c = c0; c <= c1; c++)
             {
                 byte v = PixelProvider?.Invoke(r, c) ?? 0;
                 Color col = v == 0 ? background ?? CheckerColor(r, c) : (PaletteProvider?.Invoke(v) ?? Color.Magenta);

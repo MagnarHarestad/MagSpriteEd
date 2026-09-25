@@ -80,7 +80,11 @@ internal sealed class DarkNumberBox : UserControl
         set
         {
             decimal v = Math.Clamp(value, _minimum, _maximum);
-            _text.Text = ((int)v).ToString();
+            // Only touch the TextBox when the shown text actually differs -
+            // this is set on every mouse move while dragging a sprite, and
+            // rewriting identical text still repaints and resets the caret.
+            string text = ((int)v).ToString();
+            if (_text.Text != text) _text.Text = text;
             if (v == _value) return;
             _value = v;
             ValueChanged?.Invoke(this, EventArgs.Empty);

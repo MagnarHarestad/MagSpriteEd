@@ -300,10 +300,14 @@ public sealed class MainForm : Form
         _constructPanel.PaintStrokeEnded += () => _constructStrokePieces.Clear();
         // A new placement edit makes any pixel redo stale - keeps the shared history linear.
         _constructPanel.PositionEdited += () => _redo.Clear();
+        // Fires on every Timeline step, including 17+ times a second during
+        // playback - so only the status line (frame count) is refreshed here.
+        // Construct repaints itself, and if the step changes which piece the
+        // selected sprite shows, SelectedSpriteSourceChanged below handles it.
         _constructPanel.FrameChanged += frame =>
         {
             _currentFrame = Math.Max(0, Math.Min(frame, _constructPanel.AnimFrameCount - 1));
-            RefreshAll();
+            RefreshStatus(null);
         };
         // Clicking a hardware sprite in Construct is how you pick what
         // Single Sprite View edits - it follows whichever sprite is
@@ -314,6 +318,9 @@ public sealed class MainForm : Form
             var target = _constructPanel.GetSelectedSpriteTarget();
             if (target is { } piece)
             {
+                // Raised on every frame change too - skip the full refresh
+                // when the edit target hasn't actually moved.
+                if (piece == _editPiece && _editPieceOwnerSprite == _constructPanel.PrimarySelectedSprite) return;
                 _editPiece = piece;
                 _editPieceOwnerSprite = _constructPanel.PrimarySelectedSprite;
                 _spritePoolStrip.SetSelected(piece);
@@ -332,6 +339,10 @@ public sealed class MainForm : Form
 
         _spritePoolStrip.SetPieceCount(_bank.PieceCount);
         _spritePoolStrip.SetSelected(_editPiece);
+
+        // Every layout container, including Construct's, buffered - smooth
+        // window resizes and scrolling instead of erase-then-draw flicker.
+        DoubleBuffering.EnableForContainers(this);
     }
 
     /// <summary>Scrolls the pool strip's host panel just enough to bring the
@@ -678,11 +689,32 @@ public sealed class MainForm : Form
         RefreshStatus(null);
     }
 
+    // Colours the swatch icons were last built for - RefreshAll runs often,
+    // and rebuilding 5 bitmaps (plus a toolbar relayout/repaint) every time
+    // for unchanged colours was pure waste.
+    private readonly int[] _swatchIconColors = { -1, -1, -1, -1, -1, -1 };
+
     private void UpdateSwatchIcons()
     {
         Color[] colors = { EditorPalette.BackgroundColor, PaletteColor(1), PaletteColor(2), PaletteColor(3) };
-        for (int i = 0; i < 4; i++) _swatchButtons[i].Image = Icons.Swatch(colors[i]);
-        _borderBtn.Image = Icons.BorderSwatch(EditorPalette.BorderColor, EditorPalette.BackgroundColor);
+        for (int i = 0; i < 4; i++)
+        {
+            int argb = colors[i].ToArgb();
+            if (_swatchIconColors[i] == argb) continue;
+            _swatchIconColors[i] = argb;
+            var old = _swatchButtons[i].Image;
+            _swatchButtons[i].Image = Icons.Swatch(colors[i]);
+            old?.Dispose();
+        }
+        int border = EditorPalette.BorderColor.ToArgb(), background = EditorPalette.BackgroundColor.ToArgb();
+        if (_swatchIconColors[4] != border || _swatchIconColors[5] != background)
+        {
+            _swatchIconColors[4] = border;
+            _swatchIconColors[5] = background;
+            var old = _borderBtn.Image;
+            _borderBtn.Image = Icons.BorderSwatch(EditorPalette.BorderColor, EditorPalette.BackgroundColor);
+            old?.Dispose();
+        }
     }
 
     private void ShowPalettePopup(byte slot, ToolStripButton anchor)
@@ -919,7 +951,7 @@ public sealed class MainForm : Form
                         int maxCol = hires ? SpriteBank.HiresCols : SpriteBank.QuadCols;
                         SetPixel(_editPiece, hires, row, maxCol - 1 - col, color);
                     }
-                    RefreshAfterPixelEdit(_editPiece);
+                    RefreshAfterPixelEdit(_editPiece, row, col);
                     break;
                 }
             case Tool.Fill:
@@ -978,7 +1010,7 @@ public sealed class MainForm : Form
                 break;
         }
         if (_tool == Tool.Fill) RefreshAll();
-        else RefreshAfterPixelEdit(source);
+        else RefreshAfterPixelEdit(source, row, col);
     }
 
     /// <summary>Flood fill within one piece - piece/localRow/localCol pick
@@ -1333,10 +1365,17 @@ public sealed class MainForm : Form
     /// <summary>Cheap refresh for a plain pixel edit inside one piece: skips
     /// the re-fit/toolbar-sync work RefreshAll does and only repaints the
     /// pool thumbnail of the piece that changed.</summary>
-    private void RefreshAfterPixelEdit(int piece)
+    private void RefreshAfterPixelEdit(int piece, int row, int col)
     {
-        _canvas.Invalidate();
-        _constructPanel.RefreshSpriteArt();
+        // Only what that pixel can have changed: its cell (and the mirrored
+        // one) in the edit grid - if the grid is showing this piece at all -
+        // the Construct sprites that show this piece, and its thumbnail.
+        if (piece == _editPiece)
+        {
+            _canvas.InvalidateCell(row, col);
+            if (_mirror) _canvas.InvalidateCell(row, _canvas.Cols - 1 - col);
+        }
+        _constructPanel.RefreshSpriteArt(piece);
         _spritePoolStrip.InvalidatePiece(piece);
     }
 

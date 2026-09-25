@@ -130,12 +130,121 @@ internal sealed class ConstructCanvas : Control
     internal Rectangle SpriteRect(int spriteIndex) =>
         new((int)(FrameX(SpriteX[spriteIndex]) * Zoom), (int)(FrameY(SpriteY[spriteIndex]) * Zoom), (int)(SpriteScreenW * Zoom), (int)(SpriteScreenH * Zoom));
 
+    // Cached static background layer (border fill, $d021, backdrop picture or
+    // checker grid). Redrawing it from scratch on every paint - hundreds of
+    // alpha-blended checker cells, or a scaled backdrop, over a canvas that
+    // can be thousands of pixels wide at high zoom - is what made dragging
+    // and panning lag. It's rebuilt only when something it depends on
+    // changes (see BackgroundKey); each paint just blits the visible part.
+    private Bitmap? _background;
+    private (float zoom, Size size, Bitmap? backdrop, bool grid, bool open, int border, int bg) _backgroundKey;
+
+    private (float, Size, Bitmap?, bool, bool, int, int) BackgroundKey() =>
+        (Zoom, ClientSize, Backdrop, ShowGrid, OpenBorder, EditorPalette.BorderColor.ToArgb(), EditorPalette.BackgroundColor.ToArgb());
+
+    private Bitmap GetBackground(RectangleF display)
+    {
+        var key = BackgroundKey();
+        if (_background != null && key == _backgroundKey) return _background;
+
+        _background?.Dispose();
+        var bmp = new Bitmap(Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height), System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            g.SmoothingMode = SmoothingMode.None;
+
+            // With the border opened, the whole frame is background.
+            g.FillRectangle(BrushCache.Get(OpenBorder ? EditorPalette.BackgroundColor : EditorPalette.BorderColor), 0, 0, bmp.Width, bmp.Height);
+            g.FillRectangle(BrushCache.Get(EditorPalette.BackgroundColor), display);
+
+            if (Backdrop != null)
+                g.DrawImage(Backdrop, display);
+            else if (ShowGrid)
+            {
+                // Editing aid only: a faint checker over $d021 (not replacing it),
+                // aligned to the 16-pixel character-pair grid of the display.
+                g.SetClip(display);
+                var checker = BrushCache.Get(Color.FromArgb(28, 255, 255, 255));
+                float cell = 16 * Zoom;
+                for (int cy = 0; cy * cell < display.Height; cy++)
+                    for (int cx = 0; cx * cell < display.Width; cx++)
+                        if ((cx + cy) % 2 == 0)
+                            g.FillRectangle(checker, display.X + cx * cell, display.Y + cy * cell, cell, cell);
+            }
+        }
+        _background = bmp;
+        _backgroundKey = key;
+        return bmp;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _background?.Dispose(); _background = null;
+            _labelFont?.Dispose(); _labelFont = null;
+        }
+        base.Dispose(disposing);
+    }
+
+    // Label chip font, created once instead of per sprite per paint.
+    private Font? _labelFont;
+    private Font LabelFont => _labelFont ??= new Font(Font.FontFamily, 7.5f);
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        _labelFont?.Dispose();
+        _labelFont = null;
+    }
+
+    /// <summary>Everything a sprite draws: its box, plus the label chip
+    /// above it (which can be wider than the box at low zoom) and the 2px
+    /// selection pen. Used both to skip sprites outside a paint's clip and
+    /// to invalidate only what a move actually changed.</summary>
+    private Rectangle DirtyRect(int spriteIndex)
+    {
+        var r = SpriteRect(spriteIndex);
+        return Rectangle.FromLTRB(r.Left - 3, r.Top - 18, Math.Max(r.Right, r.Left + 80) + 3, r.Bottom + 3);
+    }
+
+    /// <summary>Repaints one sprite's area only (e.g. after a pixel edit).</summary>
+    public void InvalidateSprite(int spriteIndex) => Invalidate(DirtyRect(spriteIndex));
+
+    /// <summary>Moves the given sprites by (dx, dy), clamped to the valid
+    /// register range, repainting only the areas they left and entered
+    /// instead of the whole (possibly very large) canvas.</summary>
+    private void MoveSprites(IEnumerable<int> sprites, Func<int, (int x, int y)> newPosition)
+    {
+        Region? dirty = null;
+        foreach (var s in sprites)
+        {
+            var (x, y) = newPosition(s);
+            x = Clamp(x, 0, 511);
+            y = Clamp(y, 0, 255);
+            if (x == SpriteX[s] && y == SpriteY[s]) continue;
+            dirty ??= new Region(Rectangle.Empty);
+            dirty.Union(DirtyRect(s));
+            SpriteX[s] = x;
+            SpriteY[s] = y;
+            dirty.Union(DirtyRect(s));
+        }
+        if (dirty == null) return; // nothing actually moved
+        Invalidate(dirty);
+        dirty.Dispose();
+        SpriteMoved?.Invoke();
+    }
+
+    // The whole client area is painted in OnPaint (the cached background
+    // covers it), so skip the default background erase - it only adds a
+    // second full-size fill per paint.
+    protected override void OnPaintBackground(PaintEventArgs e) { }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.InterpolationMode = InterpolationMode.NearestNeighbor;
-        g.PixelOffsetMode = PixelOffsetMode.Half;
-        g.SmoothingMode = SmoothingMode.None;
 
         var display = new RectangleF(BorderLeft * Zoom, BorderTop * Zoom, BackdropPicture.Width * Zoom, BackdropPicture.Height * Zoom);
 
@@ -143,28 +252,20 @@ internal sealed class ConstructCanvas : Control
         // (its "00" pixels are transparent so $d021 shows through), then
         // sprites, then the $d020 border ON TOP of the sprites - a sprite
         // moved into the border is hidden there, exactly as on the C64.
-        // With the border opened, the whole frame is background.
-        g.FillRectangle(BrushCache.Get(OpenBorder ? EditorPalette.BackgroundColor : EditorPalette.BorderColor), ClientRectangle);
-        g.FillRectangle(BrushCache.Get(EditorPalette.BackgroundColor), display);
+        // The first two layers come from the cached background; only the
+        // part inside the clip rectangle is copied, 1:1 with no scaling.
+        var clip = e.ClipRectangle;
+        g.CompositingMode = CompositingMode.SourceCopy;
+        g.DrawImage(GetBackground(display), clip, clip, GraphicsUnit.Pixel);
+        g.CompositingMode = CompositingMode.SourceOver;
 
-        if (Backdrop != null)
-            g.DrawImage(Backdrop, display);
-        else if (ShowGrid)
-        {
-            // Editing aid only: a faint checker over $d021 (not replacing it),
-            // aligned to the 16-pixel character-pair grid of the display.
-            var state = g.Save();
-            g.SetClip(display);
-            var checker = BrushCache.Get(Color.FromArgb(28, 255, 255, 255));
-            float cell = 16 * Zoom;
-            for (int cy = 0; cy * cell < display.Height; cy++)
-                for (int cx = 0; cx * cell < display.Width; cx++)
-                    if ((cx + cy) % 2 == 0)
-                        g.FillRectangle(checker, display.X + cx * cell, display.Y + cy * cell, cell, cell);
-            g.Restore(state);
-        }
+        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+        g.SmoothingMode = SmoothingMode.None;
 
-        for (int s = 0; s < 8; s++) DrawSpritePixels(g, s);
+        // Only sprites overlapping the area being repainted.
+        for (int s = 0; s < 8; s++)
+            if (DirtyRect(s).IntersectsWith(clip)) DrawSpritePixels(g, s);
 
         if (OpenBorder)
         {
@@ -187,7 +288,8 @@ internal sealed class ConstructCanvas : Control
 
         // Outlines and labels are an editor overlay, drawn last so a sprite
         // hidden in the border can still be seen and grabbed.
-        for (int s = 0; s < 8; s++) DrawSpriteOverlay(g, s);
+        for (int s = 0; s < 8; s++)
+            if (DirtyRect(s).IntersectsWith(clip)) DrawSpriteOverlay(g, s);
     }
 
     private void DrawSpritePixels(Graphics g, int spriteIndex)
@@ -249,7 +351,7 @@ internal sealed class ConstructCanvas : Control
         // separate Sprites table: shows which pool piece this hardware
         // sprite currently plays, right where the sprite actually is.
         string label = SpriteLabel?.Invoke(spriteIndex) ?? spriteIndex.ToString();
-        using var labelFont = new Font(Font.FontFamily, 7.5f);
+        var labelFont = LabelFont;
         var textSize = g.MeasureString(label, labelFont);
         var chipRect = new RectangleF(rect.X, rect.Y - textSize.Height, textSize.Width + 6, textSize.Height + 1);
         g.FillRectangle(BrushCache.Get(color), chipRect);
@@ -396,14 +498,7 @@ internal sealed class ConstructCanvas : Control
         if (!_dragging || SelectedSprites.Count == 0) return;
         int dx = (int)((e.X - _dragStartMouseX) / Zoom);
         int dy = (int)((e.Y - _dragStartMouseY) / Zoom);
-        foreach (var s in SelectedSprites)
-        {
-            var (sx, sy) = _dragStart[s];
-            SpriteX[s] = Clamp(sx + dx, 0, 511);
-            SpriteY[s] = Clamp(sy + dy, 0, 255);
-        }
-        Invalidate();
-        SpriteMoved?.Invoke();
+        MoveSprites(SelectedSprites, s => (_dragStart[s].x + dx, _dragStart[s].y + dy));
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -474,13 +569,7 @@ internal sealed class ConstructCanvas : Control
             case Keys.Down: dy = step; break;
             default: return;
         }
-        foreach (var s in SelectedSprites)
-        {
-            SpriteX[s] = Clamp(SpriteX[s] + dx, 0, 511);
-            SpriteY[s] = Clamp(SpriteY[s] + dy, 0, 255);
-        }
-        Invalidate();
-        SpriteMoved?.Invoke();
+        MoveSprites(SelectedSprites, s => (SpriteX[s] + dx, SpriteY[s] + dy));
     }
 
     private static int Clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);

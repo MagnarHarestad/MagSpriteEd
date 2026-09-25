@@ -93,6 +93,16 @@ internal sealed class SpritePoolStrip : Control
     public int PieceTop(int piece) => Pad + piece * RowStride;
     public int PieceBottom(int piece) => PieceTop(piece) + RowStride - Gap;
 
+    // Label font, created once instead of on every paint.
+    private Font? _labelFont;
+    private Font LabelFont => _labelFont ??= new Font(Font.FontFamily, 7.5f);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { _labelFont?.Dispose(); _labelFont = null; }
+        base.Dispose(disposing);
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -105,14 +115,13 @@ internal sealed class SpritePoolStrip : Control
         int first = Math.Max(0, (clip.Top - Pad) / RowStride);
         int last = Math.Min(PieceCount - 1, (clip.Bottom - Pad) / RowStride);
 
-        using var font = new Font(Font.FontFamily, 7.5f);
+        var font = LabelFont;
         for (int p = first; p <= last; p++)
         {
             int top = PieceTop(p);
             bool selected = p == SelectedPiece;
 
-            using (var textBrush = new SolidBrush(selected ? Color.White : Color.Gainsboro))
-                g.DrawString("#" + p, font, textBrush, Pad, top);
+            g.DrawString("#" + p, font, BrushCache.Get(selected ? Color.White : Color.Gainsboro), Pad, top);
 
             int thumbTop = top + LabelHeight;
             // Flat $d021 background, as the sprite would look on the C64 screen.

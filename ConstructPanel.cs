@@ -868,6 +868,15 @@ public sealed class ConstructPanel : UserControl
     /// because the pixel editor's data changed.</summary>
     public void RefreshSpriteArt() => _canvas.Invalidate();
 
+    /// <summary>Repaints just the hardware sprites currently showing
+    /// <paramref name="piece"/> - the cheap path for a single-pixel edit.</summary>
+    public void RefreshSpriteArt(int piece)
+    {
+        EnsureArraysAllocated();
+        for (int s = 0; s < 8; s++)
+            if (_spriteSource[_frame][s] == piece) _canvas.InvalidateSprite(s);
+    }
+
     /// <summary>Called by MainForm when any EditorPalette register changes -
     /// repaints with the new colours and updates the $d020/$d021 readout.</summary>
     public void RefreshVicColors()
