@@ -415,6 +415,17 @@ public sealed class ConstructPanel : UserControl
         _inspector.YChanged += y => SetPrimaryPosition(null, y);
     }
 
+    // H key (MainForm): keeps the info box hidden even while a sprite is selected.
+    private bool _inspectorHidden;
+
+    /// <summary>Toggles the info box under the selected sprite; returns true if now hidden.</summary>
+    public bool ToggleInspectorHidden()
+    {
+        _inspectorHidden = !_inspectorHidden;
+        RefreshInspector();
+        return _inspectorHidden;
+    }
+
     private void SetPrimaryPosition(int? x, int? y)
     {
         int s = _canvas.PrimarySelected;
@@ -449,7 +460,7 @@ public sealed class ConstructPanel : UserControl
     private void RefreshInspector()
     {
         int s = _canvas.PrimarySelected;
-        if (s < 0 || s >= 8) { _inspector.Visible = false; return; }
+        if (s < 0 || s >= 8 || _inspectorHidden) { _inspector.Visible = false; return; }
         EnsureArraysAllocated();
 
         _inspector.SetValues(_spriteSource[_frame][s], _canvas.SpriteX[s], _canvas.SpriteY[s]);

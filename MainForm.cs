@@ -841,6 +841,16 @@ public sealed class MainForm : Form
             return;
         }
 
+        // H: hide/show the info box under the selected sprite in Construct.
+        if (!e.Control && !e.Alt && !e.Shift && e.KeyCode == Keys.H && !IsTextEntryFocused())
+        {
+            bool hidden = _constructPanel.ToggleInspectorHidden();
+            RefreshStatus(hidden ? "Sprite info box hidden (H to show)." : "Sprite info box shown (H to hide).");
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
+
         // Colour shortcuts (0=Background,1=MC1,2=MC2,3=Individual - matching
         // the toolbar's left-to-right order, not the underlying byte value)
         // only when not typing into a text field (X/Y/Sprite#/Frame count/etc.).

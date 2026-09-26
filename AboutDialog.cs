@@ -167,6 +167,7 @@ internal sealed class AboutDialog : Form
         "                           < / > (or wheel) step its Sprite # through the pool;\r\n" +
         "                           X / Y: drag left/right to change (Shift = x8),\r\n" +
         "                           wheel = +/-1, or click to type a value\r\n" +
+        "  H                        Hide / show the sprite info box\r\n" +
         "  Menu > Show Grid         Toggles a faint checkerboard when no backdrop is loaded\r\n" +
         "\r\n" +
         "TOOLS\r\n" +
