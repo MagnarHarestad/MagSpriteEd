@@ -98,6 +98,10 @@ internal sealed class ConstructCanvas : Control
 
     private bool _dragging;
     private int _dragStartMouseX, _dragStartMouseY;
+    private Point _lastDragMouse;
+    // Alt was used for glue in the current/last drag - its key-up is then
+    // swallowed so Windows doesn't enter menu mode and eat the next click.
+    private bool _altUsedInDrag;
     private readonly Dictionary<int, (int x, int y)> _dragStart = new();
 
     // Middle-button pan. Tracked in
@@ -493,6 +497,8 @@ internal sealed class ConstructCanvas : Control
         if (SelectedSprites.Contains(s))
         {
             _dragging = true;
+            _altUsedInDrag = false;
+            _lastDragMouse = e.Location;
             _dragStartMouseX = e.X; _dragStartMouseY = e.Y;
             _dragStart.Clear();
             foreach (var sel in SelectedSprites) _dragStart[sel] = (SpriteX[sel], SpriteY[sel]);
@@ -554,9 +560,36 @@ internal sealed class ConstructCanvas : Control
             if (Cursor != cursor) Cursor = cursor;
             return;
         }
-        if (SelectedSprites.Count == 0) return;
-        int dx = (int)((e.X - _dragStartMouseX) / Zoom);
-        int dy = (int)((e.Y - _dragStartMouseY) / Zoom);
+        UpdateDrag(e.Location);
+    }
+
+    /// <summary>Positions the dragged selection for the given mouse point.
+    /// While Alt is held it snaps, as one block, to the nearest spot glued
+    /// flush against another sprite (the same placement Shift+G picks - see
+    /// SpriteGlue) measured from where the plain drag would put it, so the
+    /// glue follows the mouse; without Alt it moves freely.</summary>
+    private void UpdateDrag(Point mouse)
+    {
+        if (!_dragging || SelectedSprites.Count == 0) return;
+        _lastDragMouse = mouse;
+        int dx = (int)((mouse.X - _dragStartMouseX) / Zoom);
+        int dy = (int)((mouse.Y - _dragStartMouseY) / Zoom);
+
+        if ((ModifierKeys & Keys.Alt) != 0 && SelectedSprites.Count < 8)
+        {
+            _altUsedInDrag = true;
+            var xs = (int[])SpriteX.Clone();
+            var ys = (int[])SpriteY.Clone();
+            foreach (var s in SelectedSprites)
+            {
+                xs[s] = Clamp(_dragStart[s].x + dx, 0, 511);
+                ys[s] = Clamp(_dragStart[s].y + dy, 0, 255);
+            }
+            var glue = SpriteGlue.FindBestMove(xs, ys, SelectedSprites);
+            int gx = glue?.Dx ?? 0, gy = glue?.Dy ?? 0;
+            MoveSprites(SelectedSprites, s => (xs[s] + gx, ys[s] + gy));
+            return;
+        }
         MoveSprites(SelectedSprites, s => (_dragStart[s].x + dx, _dragStart[s].y + dy));
     }
 
@@ -617,6 +650,15 @@ internal sealed class ConstructCanvas : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        // Alt pressed mid-drag: snap to glue right away, without waiting for
+        // the mouse to move.
+        if (e.KeyCode == Keys.Menu && _dragging)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            UpdateDrag(_lastDragMouse);
+            return;
+        }
         if (SelectedSprites.Count == 0) return;
         int step = e.Shift ? 8 : 1;
         int dx = 0, dy = 0;
@@ -629,6 +671,17 @@ internal sealed class ConstructCanvas : Control
             default: return;
         }
         MoveSprites(SelectedSprites, s => (SpriteX[s] + dx, SpriteY[s] + dy));
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (e.KeyCode != Keys.Menu || !(_dragging || _altUsedInDrag)) return;
+        // Handled key-up keeps Windows from entering menu mode on a lone Alt.
+        e.Handled = true;
+        e.SuppressKeyPress = true;
+        if (_dragging) UpdateDrag(_lastDragMouse); // back to free movement
+        else _altUsedInDrag = false;
     }
 
     private static int Clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);

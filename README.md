@@ -36,8 +36,9 @@ rename (still using the legacy `fire_frameN_*` labels) is also supported.
   scrubbable timeline, playback (adjustable FPS, ping-pong), and zoom.
 - **Draw in Construct** - Paint sprite pixels directly in place over the
   backdrop, not only in the zoomed single-sprite view. Plain drag draws,
-  Shift+click selects, Shift+drag (or dragging a sprite's label) moves,
-  Ctrl+click groups.
+  Shift+click selects, Shift+drag (or dragging a sprite's label) moves -
+  hold Alt while dragging to snap it glued against the nearest sprite -
+  and Ctrl+click groups.
 - **Copy-on-write editing** - Drawing into a sprite that's shared by more
   than one (frame, hardware sprite) pair automatically forks it into a free
   pool slot first, so you never accidentally repaint art used elsewhere.
