@@ -163,9 +163,10 @@ internal sealed class AboutDialog : Form
         "  Shift+arrow              Nudge by 8 pixels\r\n" +
         "  Mouse wheel              Zoom the composited preview in / out\r\n" +
         "  Middle-click drag        Pan the view\r\n" +
-        "  Sprite inspector        Selecting a sprite shows a floating box next to it:\r\n" +
-        "                           < / > step its Sprite # through the pool, and\r\n" +
-        "                           X / Y set its position for the current frame\r\n" +
+        "  Sprite info box          Shown under the selected sprite:\r\n" +
+        "                           < / > (or wheel) step its Sprite # through the pool;\r\n" +
+        "                           X / Y: drag left/right to change (Shift = x8),\r\n" +
+        "                           wheel = +/-1, or click to type a value\r\n" +
         "  Menu > Show Grid         Toggles a faint checkerboard when no backdrop is loaded\r\n" +
         "\r\n" +
         "TOOLS\r\n" +

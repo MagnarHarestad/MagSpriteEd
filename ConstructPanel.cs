@@ -38,10 +38,7 @@ public sealed class ConstructPanel : UserControl
     // table. A single instance, repositioned to hover next to whichever
     // hardware sprite is PrimarySelected (see RefreshInspector), instead of
     // a fixed-position panel listing all 8 at once.
-    private FlowLayoutPanel _inspector = null!;
-    private Button _pieceLeftBtn = null!, _pieceRightBtn = null!;
-    private Label _pieceLabel = null!;
-    private DarkNumberBox _xUpDown = null!, _yUpDown = null!;
+    private SpriteInspector _inspector = null!;
 
     private Button _playButton = null!;
     private DarkNumberBox _fpsUpDown = null!;
@@ -411,58 +408,21 @@ public sealed class ConstructPanel : UserControl
     /// than in a fixed list elsewhere on screen.</summary>
     private void BuildInspector()
     {
-        _inspector = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.LeftToRight,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false,
-            BackColor = Color.FromArgb(38, 38, 38),
-            BorderStyle = BorderStyle.FixedSingle,
-            Padding = new Padding(4),
-            Visible = false
-        };
+        _inspector = new SpriteInspector { Visible = false };
+        _inspector.PieceStepped += StepPiece;
+        _inspector.BeforeEdit += PushPositionUndo;
+        _inspector.XChanged += x => SetPrimaryPosition(x, null);
+        _inspector.YChanged += y => SetPrimaryPosition(null, y);
+    }
 
-        _pieceLeftBtn = new Button { Text = "<", Width = 22, Height = 22, Margin = new Padding(1, 1, 1, 1) };
-        _pieceLeftBtn.Click += (_, _) => StepPiece(-1);
-        // MinimumSize keeps the box from shifting width as the number goes 9 -> 10 -> 100.
-        _pieceLabel = new Label { AutoSize = true, MinimumSize = new Size(26, 0), ForeColor = Color.Gainsboro, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(2, 5, 2, 0) };
-        _pieceRightBtn = new Button { Text = ">", Width = 22, Height = 22, Margin = new Padding(1, 1, 6, 1) };
-        _pieceRightBtn.Click += (_, _) => StepPiece(1);
-
-        var xLabel = new Label { Text = "X", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 5, 2, 0) };
-        _xUpDown = new DarkNumberBox { Minimum = 0, Maximum = 511, Width = 46, TextAlign = HorizontalAlignment.Center, Margin = new Padding(0, 1, 8, 1) };
-        _xUpDown.Enter += (_, _) => PushPositionUndo();
-        _xUpDown.ValueChanged += (_, _) =>
-        {
-            if (_suppressEvents) return;
-            int s = _canvas.PrimarySelected;
-            if (s < 0) return;
-            _canvas.SpriteX[s] = (int)_xUpDown.Value;
-            _canvas.Invalidate();
-            CommitCanvasPositionsToCurrentFrame();
-        };
-
-        var yLabel = new Label { Text = "Y", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(2, 5, 2, 0) };
-        _yUpDown = new DarkNumberBox { Minimum = 0, Maximum = 255, Width = 46, TextAlign = HorizontalAlignment.Center, Margin = new Padding(0, 1, 1, 1) };
-        _yUpDown.Enter += (_, _) => PushPositionUndo();
-        _yUpDown.ValueChanged += (_, _) =>
-        {
-            if (_suppressEvents) return;
-            int s = _canvas.PrimarySelected;
-            if (s < 0) return;
-            _canvas.SpriteY[s] = (int)_yUpDown.Value;
-            _canvas.Invalidate();
-            CommitCanvasPositionsToCurrentFrame();
-        };
-
-        _inspector.Controls.Add(_pieceLeftBtn);
-        _inspector.Controls.Add(_pieceLabel);
-        _inspector.Controls.Add(_pieceRightBtn);
-        _inspector.Controls.Add(xLabel);
-        _inspector.Controls.Add(_xUpDown);
-        _inspector.Controls.Add(yLabel);
-        _inspector.Controls.Add(_yUpDown);
+    private void SetPrimaryPosition(int? x, int? y)
+    {
+        int s = _canvas.PrimarySelected;
+        if (s < 0) return;
+        if (x is { } nx) _canvas.SpriteX[s] = nx;
+        if (y is { } ny) _canvas.SpriteY[s] = ny;
+        _canvas.Invalidate();
+        CommitCanvasPositionsToCurrentFrame();
     }
 
     /// <summary>Steps the primary-selected hardware sprite's Sprite # (its
@@ -492,21 +452,12 @@ public sealed class ConstructPanel : UserControl
         if (s < 0 || s >= 8) { _inspector.Visible = false; return; }
         EnsureArraysAllocated();
 
-        bool prev = _suppressEvents;
-        _suppressEvents = true;
-        try
-        {
-            _pieceLabel.Text = _spriteSource[_frame][s].ToString();
-            _xUpDown.Value = Math.Max(_xUpDown.Minimum, Math.Min(_xUpDown.Maximum, _canvas.SpriteX[s]));
-            _yUpDown.Value = Math.Max(_yUpDown.Minimum, Math.Min(_yUpDown.Maximum, _canvas.SpriteY[s]));
-        }
-        finally { _suppressEvents = prev; }
+        _inspector.SetValues(_spriteSource[_frame][s], _canvas.SpriteX[s], _canvas.SpriteY[s]);
 
         // Centred under the sprite (its label chip sits above the box, so
         // below keeps the two apart); flips above if it would run off the
         // bottom of the canvas.
         var rect = _canvas.SpriteRect(s);
-        _inspector.Size = _inspector.PreferredSize;
         int x = rect.Left + (rect.Width - _inspector.Width) / 2;
         x = Math.Max(0, Math.Min(x, _canvas.Width - _inspector.Width));
         int y = rect.Bottom + 4;
