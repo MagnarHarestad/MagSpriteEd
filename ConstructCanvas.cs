@@ -15,7 +15,8 @@ namespace MagSpriteEd;
 /// Mouse: plain left/right drag draws on / erases the sprite under the
 /// cursor (raised as CellInteract - MainForm applies the edit), Shift+click
 /// selects a sprite and Shift+drag moves the selection, Ctrl+click toggles
-/// a sprite in/out of the group. Shift-clicking an already-selected member
+/// a sprite in/out of the group, Alt+click selects and glues it to the
+/// nearest sprite (Alt+drag keeps snapping to glued spots). Shift-clicking an already-selected member
 /// of a multi-sprite selection keeps the whole group selected, so the drag
 /// moves everyone together. Middle-drag pans, the wheel zooms.
 /// </summary>
@@ -426,10 +427,24 @@ internal sealed class ConstructCanvas : Control
         }
 
         // Plain left/right = draw on the sprite under the cursor; Shift =
-        // select (and drag to move); Ctrl = add/remove from the group.
-        // Left-clicking a sprite's label chip grabs it like Shift+click.
+        // select (and drag to move); Ctrl = add/remove from the group;
+        // Alt = select and glue to the nearest sprite (keep dragging to move
+        // it along glued spots). Left-clicking a sprite's label chip grabs
+        // it like Shift+click.
         bool ctrl = (ModifierKeys & Keys.Control) != 0;
         bool shift = (ModifierKeys & Keys.Shift) != 0;
+        bool alt = (ModifierKeys & Keys.Alt) != 0;
+
+        if (e.Button == MouseButtons.Left && alt && !ctrl)
+        {
+            _altUsedInDrag = true; // swallow the Alt key-up (see OnKeyUp)
+            int s = LabelChipAt(e.Location);
+            if (s < 0) s = SpriteAt(e.Location);
+            if (s < 0) return;
+            SelectSprite(s, e, ctrl: false);
+            UpdateDrag(e.Location); // Alt is held, so this glues right away
+            return;
+        }
 
         if (e.Button == MouseButtons.Left)
         {
@@ -446,7 +461,7 @@ internal sealed class ConstructCanvas : Control
             SelectAt(e, ctrl);
             return;
         }
-        if (ctrl || shift) return;
+        if (ctrl || shift || alt) return;
 
         if (e.Button is MouseButtons.Left or MouseButtons.Right)
         {
@@ -458,12 +473,20 @@ internal sealed class ConstructCanvas : Control
         }
     }
 
-    private void SelectAt(MouseEventArgs e, bool ctrl)
+    /// <summary>Topmost sprite whose box contains p, or -1.</summary>
+    private int SpriteAt(Point p)
     {
         for (int s = 7; s >= 0; s--)
+            if (SpriteRect(s).Contains(p)) return s;
+        return -1;
+    }
+
+    private void SelectAt(MouseEventArgs e, bool ctrl)
+    {
+        int hit = SpriteAt(e.Location);
+        if (hit >= 0)
         {
-            if (!SpriteRect(s).Contains(e.Location)) continue;
-            SelectSprite(s, e, ctrl);
+            SelectSprite(hit, e, ctrl);
             return;
         }
 
@@ -565,9 +588,10 @@ internal sealed class ConstructCanvas : Control
 
     /// <summary>Positions the dragged selection for the given mouse point.
     /// While Alt is held it snaps, as one block, to the nearest spot glued
-    /// flush against another sprite (the same placement Shift+G picks - see
-    /// SpriteGlue) measured from where the plain drag would put it, so the
-    /// glue follows the mouse; without Alt it moves freely.</summary>
+    /// flush against another sprite (the same placement the toolbar Glue
+    /// button picks - see SpriteGlue) measured from where the plain drag
+    /// would put it, so the glue follows the mouse; without Alt it moves
+    /// freely. Called straight from an Alt+click too, which glues at once.</summary>
     private void UpdateDrag(Point mouse)
     {
         if (!_dragging || SelectedSprites.Count == 0) return;

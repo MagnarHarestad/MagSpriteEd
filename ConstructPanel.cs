@@ -236,7 +236,7 @@ public sealed class ConstructPanel : UserControl
         _canvas.MouseDown += (_, e) =>
         {
             if (e.Button == MouseButtons.Left &&
-                ((ModifierKeys & (Keys.Shift | Keys.Control)) != 0 || _canvas.LabelChipAt(e.Location) >= 0))
+                ((ModifierKeys & (Keys.Shift | Keys.Control | Keys.Alt)) != 0 || _canvas.LabelChipAt(e.Location) >= 0))
                 PushPositionUndo();
         };
         _canvas.KeyDown += (_, e) =>
@@ -682,7 +682,7 @@ public sealed class ConstructPanel : UserControl
     /// frame is on screen here.</summary>
     public event Action<int>? FrameChanged;
 
-    /// <summary>Shift+G / toolbar Glue: moves the selected sprite(s), as one
+    /// <summary>Toolbar Glue: moves the selected sprite(s), as one
     /// block, flush against the nearest other sprite - see SpriteGlue for
     /// how the placement is chosen. Returns a status line for MainForm.</summary>
     public string GlueSelection()

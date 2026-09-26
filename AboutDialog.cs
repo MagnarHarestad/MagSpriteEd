@@ -154,13 +154,13 @@ internal sealed class AboutDialog : Form
         "  Shift+click              Select a sprite (Shift on empty space deselects)\r\n" +
         "  Shift+drag               Move the selected sprite(s)\r\n" +
         "  Drag a label (S3 - #6)   Same as Shift+drag: grab and move that sprite\r\n" +
-        "  Hold Alt while dragging  Snap to the nearest spot glued against another\r\n" +
-        "                           sprite (like Shift+G); let go of Alt to move freely\r\n" +
+        "  Alt+click a sprite       Select it and glue it flush against the nearest\r\n" +
+        "                           sprite (smallest move, edges aligned, no overlap)\r\n" +
+        "  Hold Alt while dragging  Keep snapping to glued spots as you move; let go\r\n" +
+        "                           of Alt to move freely\r\n" +
         "  Ctrl+click               Add/remove a sprite from the selection group\r\n" +
         "  Arrow keys               Nudge the selected sprite(s) by 1 pixel\r\n" +
         "  Shift+arrow              Nudge by 8 pixels\r\n" +
-        "  Shift+G                  Glue the selected sprite(s) flush against the nearest\r\n" +
-        "                           sprite (smallest move, edges aligned, no overlap)\r\n" +
         "  Mouse wheel              Zoom the composited preview in / out\r\n" +
         "  Middle-click drag        Pan the view\r\n" +
         "  Sprite inspector        Selecting a sprite shows a floating box next to it:\r\n" +

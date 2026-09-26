@@ -605,9 +605,9 @@ public sealed class MainForm : Form
         openBorderBtn.CheckedChanged += (_, _) => _constructPanel.OpenBorder = openBorderBtn.Checked;
         _toolbar.Items.Add(openBorderBtn);
 
-        // -- Glue (also Shift+G): snap the selected sprite(s) flush against
-        // the nearest other sprite. --
-        AddToolbarButton(Icons.Glue(), "Glue selected sprite(s) to the nearest sprite (Shift+G)", (_, _) => GlueSelection());
+        // -- Glue: snap the selected sprite(s) flush against the nearest other
+        // sprite. In Construct, Alt+click on a sprite does the same. --
+        AddToolbarButton(Icons.Glue(), "Glue selected sprite(s) to the nearest sprite (or Alt+click a sprite in Construct)", (_, _) => GlueSelection());
 
         // -- Sprite outline visibility (far right of the toolbar) in Construct's composited preview -
         // moved here from the removed "Backdrop" panel's own checkbox. --
@@ -836,15 +836,6 @@ public sealed class MainForm : Form
         if (e.Control && !e.Alt && e.KeyCode == Keys.S)
         {
             if (e.Shift) SaveProject(); else SaveProjectQuick();
-            e.Handled = true;
-            e.SuppressKeyPress = true;
-            return;
-        }
-
-        // Shift+G: glue the Construct selection to the nearest sprite.
-        if (e.Shift && !e.Control && !e.Alt && e.KeyCode == Keys.G && !IsTextEntryFocused())
-        {
-            GlueSelection();
             e.Handled = true;
             e.SuppressKeyPress = true;
             return;

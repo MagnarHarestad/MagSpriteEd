@@ -5,7 +5,8 @@ namespace MagSpriteEd;
 
 /// <summary>
 /// Finds where to move a group of hardware sprites so it sits flush against
-/// the nearest other sprite ("glue", Shift+G in Construct). Pure maths on
+/// the nearest other sprite ("glue": Alt+click / Alt+drag in Construct, or
+/// the toolbar Glue button). Pure maths on
 /// positions only - no UI - so it can be reasoned about and tested alone.
 ///
 /// Every sprite occupies a 24x21 box in sprite coordinates (multicolour and
@@ -22,7 +23,7 @@ namespace MagSpriteEd;
 /// A candidate is rejected if any moved sprite would leave the valid
 /// register range (X 0..511, Y 0..255) or overlap any non-selected sprite
 /// (touching edges is fine - that's the point). Of the rest, the one with
-/// the shortest move wins (Euclidean distance), so Shift+G always does the
+/// the shortest move wins (Euclidean distance), so a glue always does the
 /// smallest change that makes the selection glued. Ties prefer the move
 /// with less total axis travel, then a horizontal join (sprites side by side
 /// share the same raster lines, which is usually what a composed object wants).
