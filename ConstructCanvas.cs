@@ -198,6 +198,42 @@ internal sealed class ConstructCanvas : Control
         base.OnFontChanged(e);
         _labelFont?.Dispose();
         _labelFont = null;
+        _labelSizes.Clear();
+    }
+
+    // Measured label chip text sizes, keyed by label ("S3 - #6"). Lets
+    // LabelChipRect work outside of paint (for click hit-testing) and give
+    // exactly the same box the paint drew.
+    private readonly Dictionary<string, SizeF> _labelSizes = new();
+
+    private SizeF MeasureLabel(Graphics? g, string label)
+    {
+        if (_labelSizes.TryGetValue(label, out var size)) return size;
+        if (g != null) size = g.MeasureString(label, LabelFont);
+        else { using var cg = CreateGraphics(); size = cg.MeasureString(label, LabelFont); }
+        _labelSizes[label] = size;
+        return size;
+    }
+
+    /// <summary>The "S3 - #6" label chip sitting just above a sprite's box.
+    /// g is the paint Graphics when drawing, null when hit-testing.</summary>
+    private RectangleF LabelChipRect(Graphics? g, int spriteIndex)
+    {
+        var rect = SpriteRect(spriteIndex);
+        string label = SpriteLabel?.Invoke(spriteIndex) ?? spriteIndex.ToString();
+        var size = MeasureLabel(g, label);
+        return new RectangleF(rect.X, rect.Y - size.Height, size.Width + 6, size.Height + 1);
+    }
+
+    /// <summary>The sprite whose label chip is under p, or -1 (topmost
+    /// first, matching draw order). Chips only exist while outlines show.
+    /// Clicking a chip grabs that sprite for moving - see OnMouseDown.</summary>
+    public int LabelChipAt(Point p)
+    {
+        if (!ShowOutlines) return -1;
+        for (int s = 7; s >= 0; s--)
+            if (LabelChipRect(null, s).Contains(p)) return s;
+        return -1;
     }
 
     /// <summary>Everything a sprite draws: its box, plus the label chip
@@ -350,12 +386,11 @@ internal sealed class ConstructCanvas : Control
         // inside it - readable at a glance, and it's what replaces the old
         // separate Sprites table: shows which pool piece this hardware
         // sprite currently plays, right where the sprite actually is.
+        // Clicking the chip grabs the sprite for moving (see OnMouseDown).
         string label = SpriteLabel?.Invoke(spriteIndex) ?? spriteIndex.ToString();
-        var labelFont = LabelFont;
-        var textSize = g.MeasureString(label, labelFont);
-        var chipRect = new RectangleF(rect.X, rect.Y - textSize.Height, textSize.Width + 6, textSize.Height + 1);
+        var chipRect = LabelChipRect(g, spriteIndex);
         g.FillRectangle(BrushCache.Get(color), chipRect);
-        g.DrawString(label, labelFont, BrushCache.Get(Color.FromArgb(20, 20, 20)), chipRect.X + 3, chipRect.Y);
+        g.DrawString(label, LabelFont, BrushCache.Get(Color.FromArgb(20, 20, 20)), chipRect.X + 3, chipRect.Y);
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -388,8 +423,19 @@ internal sealed class ConstructCanvas : Control
 
         // Plain left/right = draw on the sprite under the cursor; Shift =
         // select (and drag to move); Ctrl = add/remove from the group.
+        // Left-clicking a sprite's label chip grabs it like Shift+click.
         bool ctrl = (ModifierKeys & Keys.Control) != 0;
         bool shift = (ModifierKeys & Keys.Shift) != 0;
+
+        if (e.Button == MouseButtons.Left)
+        {
+            int chip = LabelChipAt(e.Location);
+            if (chip >= 0)
+            {
+                SelectSprite(chip, e, ctrl);
+                return;
+            }
+        }
 
         if (e.Button == MouseButtons.Left && (ctrl || shift))
         {
@@ -413,30 +459,7 @@ internal sealed class ConstructCanvas : Control
         for (int s = 7; s >= 0; s--)
         {
             if (!SpriteRect(s).Contains(e.Location)) continue;
-
-            if (ctrl)
-            {
-                if (!SelectedSprites.Remove(s)) SelectedSprites.Add(s);
-            }
-            else if (!SelectedSprites.Contains(s))
-            {
-                // Shift-click on a sprite outside the current group starts a new single selection.
-                SelectedSprites.Clear();
-                SelectedSprites.Add(s);
-            }
-            // else: Shift-clicking an already-selected member of a multi-selection keeps
-            // the whole group selected, so the drag below moves everyone together.
-            PrimarySelected = s;
-
-            if (SelectedSprites.Contains(s))
-            {
-                _dragging = true;
-                _dragStartMouseX = e.X; _dragStartMouseY = e.Y;
-                _dragStart.Clear();
-                foreach (var sel in SelectedSprites) _dragStart[sel] = (SpriteX[sel], SpriteY[sel]);
-            }
-            SelectionChanged?.Invoke();
-            Invalidate();
+            SelectSprite(s, e, ctrl);
             return;
         }
 
@@ -447,6 +470,35 @@ internal sealed class ConstructCanvas : Control
             SelectionChanged?.Invoke();
             Invalidate();
         }
+    }
+
+    /// <summary>Selects sprite s (Ctrl toggles it in/out of the group
+    /// instead) and starts a move drag if it ended up selected.</summary>
+    private void SelectSprite(int s, MouseEventArgs e, bool ctrl)
+    {
+        if (ctrl)
+        {
+            if (!SelectedSprites.Remove(s)) SelectedSprites.Add(s);
+        }
+        else if (!SelectedSprites.Contains(s))
+        {
+            // Grabbing a sprite outside the current group starts a new single selection.
+            SelectedSprites.Clear();
+            SelectedSprites.Add(s);
+        }
+        // else: grabbing an already-selected member of a multi-selection keeps
+        // the whole group selected, so the drag below moves everyone together.
+        PrimarySelected = s;
+
+        if (SelectedSprites.Contains(s))
+        {
+            _dragging = true;
+            _dragStartMouseX = e.X; _dragStartMouseY = e.Y;
+            _dragStart.Clear();
+            foreach (var sel in SelectedSprites) _dragStart[sel] = (SpriteX[sel], SpriteY[sel]);
+        }
+        SelectionChanged?.Invoke();
+        Invalidate();
     }
 
     /// <summary>Raises CellInteract for the sprite pixel under the cursor,
@@ -495,7 +547,14 @@ internal sealed class ConstructCanvas : Control
             if ((e.Button & _paintButton) != 0) PaintAt(e.Location, _paintButton);
             return;
         }
-        if (!_dragging || SelectedSprites.Count == 0) return;
+        if (!_dragging)
+        {
+            // Hint that a label chip can be grabbed.
+            var cursor = LabelChipAt(e.Location) >= 0 ? Cursors.SizeAll : Cursors.Default;
+            if (Cursor != cursor) Cursor = cursor;
+            return;
+        }
+        if (SelectedSprites.Count == 0) return;
         int dx = (int)((e.X - _dragStartMouseX) / Zoom);
         int dy = (int)((e.Y - _dragStartMouseY) / Zoom);
         MoveSprites(SelectedSprites, s => (_dragStart[s].x + dx, _dragStart[s].y + dy));

@@ -153,6 +153,7 @@ internal sealed class AboutDialog : Form
         "                           (not in the border - it covers the sprites there)\r\n" +
         "  Shift+click              Select a sprite (Shift on empty space deselects)\r\n" +
         "  Shift+drag               Move the selected sprite(s)\r\n" +
+        "  Drag a label (S3 - #6)   Same as Shift+drag: grab and move that sprite\r\n" +
         "  Ctrl+click               Add/remove a sprite from the selection group\r\n" +
         "  Arrow keys               Nudge the selected sprite(s) by 1 pixel\r\n" +
         "  Shift+arrow              Nudge by 8 pixels\r\n" +

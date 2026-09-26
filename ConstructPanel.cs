@@ -235,7 +235,8 @@ public sealed class ConstructPanel : UserControl
         // undoes whichever of a drawing or a placement change is newest.
         _canvas.MouseDown += (_, e) =>
         {
-            if (e.Button == MouseButtons.Left && (ModifierKeys & (Keys.Shift | Keys.Control)) != 0)
+            if (e.Button == MouseButtons.Left &&
+                ((ModifierKeys & (Keys.Shift | Keys.Control)) != 0 || _canvas.LabelChipAt(e.Location) >= 0))
                 PushPositionUndo();
         };
         _canvas.KeyDown += (_, e) =>
